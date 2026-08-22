@@ -1,0 +1,25 @@
+# 编译产物
+server
+*.so
+build/
+*.o
+*.moc
+moc_*
+qrc_*
+*.stash
+*.pro.user
+
+# 系统文件
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# 临时
+*.tmp
+*.log
+/tmp/

@@ -1,0 +1,59 @@
+name: Build NeteasePlayer Plugin
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'plugin/**'
+      - '.github/workflows/**'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential git-lfs \
+            libavformat-dev libavcodec-dev libavutil-dev libswresample-dev
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Clone Qt 5.15.2 for aarch64
+        run: git clone --depth 1 https://github.com/Lyrecoul/qt-5.15.2-for-aarch64-dictpen-linux.git
+
+      - name: Clone GCC toolchain
+        run: git clone --depth 1 https://github.com/Lyrecoul/aarch64-dictpen-linux-gnu-gcc-toolchain.git
+
+      - name: Clone dictpen-libs
+        run: git clone --depth 1 https://github.com/Lyrecoul/dictpen-libs.git
+
+      - name: Set up environment
+        run: |
+          echo "$PWD/qt-5.15.2-for-aarch64-dictpen-linux/bin" >> $GITHUB_PATH
+          echo "$PWD/aarch64-dictpen-linux-gnu-gcc-toolchain/bin" >> $GITHUB_PATH
+
+      - name: Copy FFmpeg headers
+        run: |
+          mkdir -p plugin/include
+          cp -r /usr/include/x86_64-linux-gnu/libav* plugin/include/ 2>/dev/null || true
+          cp -r /usr/include/libav* plugin/include/ 2>/dev/null || true
+          ls -la plugin/include/
+
+      - name: Build with qmake
+        run: |
+          cd plugin
+          ../qt-5.15.2-for-aarch64-dictpen-linux/bin/qmake NeteasePlayer.pro
+          make -j$(nproc)
+
+      - name: Strip debug symbols
+        run: |
+          aarch64-dictpen-linux-gnu-strip build/libnetease_player.so
+          ls -lh build/libnetease_player.so
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: libnetease_player
+          path: plugin/build/libnetease_player.so
