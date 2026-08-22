@@ -25,11 +25,10 @@ INCLUDEPATH += $$PWD/../qt-5.15.2-for-aarch64-dictpen-linux/include/QtQml/5.15.2
 INCLUDEPATH += $$PWD/../qt-5.15.2-for-aarch64-dictpen-linux/include
 LIBS += -lQt5Qml
 
-# FFmpeg 头文件路径（主机头文件平台无关，可用于交叉编译）
+# FFmpeg 头文件路径（已从主机复制到 plugin/include/，平台无关）
+# 注意：不能加 /usr/include/x86_64-linux-gnu 等主机路径，
+# 否则交叉编译器会包含 x86 特定的 gnu/stubs.h 导致编译失败
 INCLUDEPATH += $$PWD/include
-INCLUDEPATH += /usr/include/x86_64-linux-gnu
-INCLUDEPATH += /usr/include
-INCLUDEPATH += /usr/local/include
 
 # FFmpeg 库路径（dictpen-libs 交叉编译库）
 exists($$PWD/../dictpen-libs) {
