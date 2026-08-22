@@ -14,7 +14,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential git-lfs ffmpeg \
+          sudo apt-get install -y build-essential git-lfs ffmpeg pkg-config \
             libavformat-dev libavcodec-dev libavutil-dev libswscale-dev
 
       - name: Checkout repository
@@ -34,29 +34,53 @@ jobs:
           echo "$PWD/qt-5.15.2-for-aarch64-dictpen-linux/bin" >> $GITHUB_PATH
           echo "$PWD/aarch64-dictpen-linux-gnu-gcc-toolchain/bin" >> $GITHUB_PATH
 
-      - name: Locate and copy FFmpeg headers
+      - name: Prepare FFmpeg headers
         run: |
+          set -e
           mkdir -p plugin/include
-          # 找到所有 libav* 头文件目录并复制
-          find /usr -type d -name "libav*" 2>/dev/null | while read dir; do
-            cp -r "$dir" plugin/include/ 2>/dev/null || true
+          # 用 pkg-config 获取 FFmpeg 头文件路径
+          echo "=== pkg-config cflags ==="
+          pkg-config --cflags libavformat libavcodec libavutil libswresample 2>&1 || true
+          # 直接从已知位置复制（Ubuntu 多架构路径）
+          for dir in /usr/include/x86_64-linux-gnu/libav* /usr/include/libav*; do
+            if [ -d "$dir" ]; then
+              cp -r "$dir" plugin/include/
+              echo "Copied: $dir"
+            fi
           done
-          echo "=== include 目录内容 ==="
+          echo "=== include 目录 ==="
           ls -la plugin/include/
-          echo "=== 检查 swresample.h ==="
+          echo "=== swresample.h 位置 ==="
           find plugin/include -name "swresample.h" 2>/dev/null || echo "NOT FOUND in include"
-          find /usr -name "swresample.h" 2>/dev/null || echo "NOT FOUND in system"
+          dpkg -L libavutil-dev 2>/dev/null | grep -i swresample || echo "not in libavutil-dev"
+          dpkg -L libavcodec-dev 2>/dev/null | grep -i swresample || echo "not in libavcodec-dev"
+
+      - name: Verify qmake
+        run: |
+          set -e
+          echo "=== qmake version ==="
+          ./qt-5.15.2-for-aarch64-dictpen-linux/bin/qmake --version
+          echo "=== gcc version ==="
+          aarch64-dictpen-linux-gnu-g++ --version | head -1
+          echo "=== dictpen-libs ==="
+          ls dictpen-libs/ | head -20
 
       - name: Build with qmake
         run: |
+          set -e
           cd plugin
+          echo "=== Running qmake ==="
           ../qt-5.15.2-for-aarch64-dictpen-linux/bin/qmake NeteasePlayer.pro
-          make -j$(nproc)
+          echo "=== qmake done, running make ==="
+          make -j$(nproc) 2>&1
+          echo "=== make done ==="
+          ls -lh build/
 
       - name: Strip debug symbols
         run: |
-          aarch64-dictpen-linux-gnu-strip build/libnetease_player.so
-          ls -lh build/libnetease_player.so
+          set -e
+          aarch64-dictpen-linux-gnu-strip plugin/build/libnetease_player.so
+          ls -lh plugin/build/libnetease_player.so
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
