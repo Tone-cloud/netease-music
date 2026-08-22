@@ -14,8 +14,8 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential git-lfs \
-            libavformat-dev libavcodec-dev libavutil-dev libswresample-dev
+          sudo apt-get install -y build-essential git-lfs ffmpeg \
+            libavformat-dev libavcodec-dev libavutil-dev libswscale-dev
 
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -34,12 +34,18 @@ jobs:
           echo "$PWD/qt-5.15.2-for-aarch64-dictpen-linux/bin" >> $GITHUB_PATH
           echo "$PWD/aarch64-dictpen-linux-gnu-gcc-toolchain/bin" >> $GITHUB_PATH
 
-      - name: Copy FFmpeg headers
+      - name: Locate and copy FFmpeg headers
         run: |
           mkdir -p plugin/include
-          cp -r /usr/include/x86_64-linux-gnu/libav* plugin/include/ 2>/dev/null || true
-          cp -r /usr/include/libav* plugin/include/ 2>/dev/null || true
+          # 找到所有 libav* 头文件目录并复制
+          find /usr -type d -name "libav*" 2>/dev/null | while read dir; do
+            cp -r "$dir" plugin/include/ 2>/dev/null || true
+          done
+          echo "=== include 目录内容 ==="
           ls -la plugin/include/
+          echo "=== 检查 swresample.h ==="
+          find plugin/include -name "swresample.h" 2>/dev/null || echo "NOT FOUND in include"
+          find /usr -name "swresample.h" 2>/dev/null || echo "NOT FOUND in system"
 
       - name: Build with qmake
         run: |

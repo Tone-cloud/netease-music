@@ -18,14 +18,11 @@ HEADERS += \
     NeteasePlayer.h \
     AudioDecoder.h
 
-# FFmpeg 头文件路径（GitHub Actions 中通过 apt 安装或 include/ 目录）
-exists($$PWD/include/libavformat) {
-    INCLUDEPATH += $$PWD/include
-} else {
-    # Ubuntu 上的标准路径
-    INCLUDEPATH += /usr/include/x86_64-linux-gnu
-    INCLUDEPATH += /usr/include
-}
+# FFmpeg 头文件路径（主机头文件平台无关，可用于交叉编译）
+INCLUDEPATH += $$PWD/include
+INCLUDEPATH += /usr/include/x86_64-linux-gnu
+INCLUDEPATH += /usr/include
+INCLUDEPATH += /usr/local/include
 
 # FFmpeg 库路径（dictpen-libs 交叉编译库）
 exists($$PWD/../dictpen-libs) {
