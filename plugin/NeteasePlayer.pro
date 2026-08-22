@@ -19,8 +19,10 @@ HEADERS += \
     AudioDecoder.h
 
 # QtQml 手动包含（QT += qml 模块检测在交叉编译时可能失败）
-INCLUDEPATH += $$[QT_INSTALL_HEADERS]/QtQml
-INCLUDEPATH += $$[QT_INSTALL_HEADERS]/QtQml/$$[QT_VERSION]
+# 用相对路径，因为 Qt 编译目录在项目根目录下
+INCLUDEPATH += $$PWD/../qt-5.15.2-for-aarch64-dictpen-linux/include/QtQml
+INCLUDEPATH += $$PWD/../qt-5.15.2-for-aarch64-dictpen-linux/include/QtQml/5.15.2
+INCLUDEPATH += $$PWD/../qt-5.15.2-for-aarch64-dictpen-linux/include
 LIBS += -lQt5Qml
 
 # FFmpeg 头文件路径（主机头文件平台无关，可用于交叉编译）
