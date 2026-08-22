@@ -89,7 +89,7 @@ jobs:
             exit 1
           fi
           echo "=== make done ==="
-          ls -lh build/
+          ls -lh ../build/
 
       - name: Strip debug symbols
         run: |
