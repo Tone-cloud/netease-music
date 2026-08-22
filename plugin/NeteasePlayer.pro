@@ -2,7 +2,7 @@
 # FFmpeg 解码 + QAudioOutput 播放，QML 类型 NeteasePlayer
 
 QT       += core multimedia
-CONFIG   += plugin c++11
+CONFIG   += shared c++11
 TEMPLATE = lib
 TARGET   = netease_player
 

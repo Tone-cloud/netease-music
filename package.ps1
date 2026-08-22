@@ -16,13 +16,16 @@ $files = @(
 )
 
 # 检查 libnetease_player.so 是否存在
-$soFile = "$root\plugin\build\libnetease_player.so"
+$soFile = "$root\build\libnetease_player.so"
+if (-not (Test-Path $soFile)) {
+    $soFile = "$root\plugin\build\libnetease_player.so"
+}
 if (Test-Path $soFile) {
     Copy-Item $soFile "$root\libnetease_player.so" -Force
     $files += "$root\libnetease_player.so"
     Write-Host "已包含 libnetease_player.so"
 } else {
-    Write-Host "警告: libnetease_player.so 不存在，请从 GitHub Actions 下载后放入插件目录"
+    Write-Host "警告: libnetease_player.so 不存在，请从 GitHub Actions 下载后放入 build/ 目录"
     Write-Host "打包将不包含 .so 文件"
 }
 
