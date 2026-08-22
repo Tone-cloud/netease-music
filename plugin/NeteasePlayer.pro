@@ -1,7 +1,7 @@
 # NeteasePlayer - 词典笔网易云音乐播放器插件
 # FFmpeg 解码 + QAudioOutput 播放，QML 类型 NeteasePlayer
 
-QT       += core multimedia
+QT       += core multimedia qml
 CONFIG   += plugin c++11
 TEMPLATE = lib
 TARGET   = netease_player

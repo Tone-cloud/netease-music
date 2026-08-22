@@ -79,11 +79,11 @@ jobs:
       - name: Strip debug symbols
         run: |
           set -e
-          aarch64-dictpen-linux-gnu-strip plugin/build/libnetease_player.so
-          ls -lh plugin/build/libnetease_player.so
+          aarch64-dictpen-linux-gnu-strip build/libnetease_player.so
+          ls -lh build/libnetease_player.so
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: libnetease_player
-          path: plugin/build/libnetease_player.so
+          path: build/libnetease_player.so
