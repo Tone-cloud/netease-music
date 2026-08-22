@@ -1,7 +1,7 @@
 # NeteasePlayer - 词典笔网易云音乐播放器插件
 # FFmpeg 解码 + QAudioOutput 播放，QML 类型 NeteasePlayer
 
-QT       += core multimedia qml
+QT       += core multimedia
 CONFIG   += plugin c++11
 TEMPLATE = lib
 TARGET   = netease_player
@@ -17,6 +17,11 @@ SOURCES += \
 HEADERS += \
     NeteasePlayer.h \
     AudioDecoder.h
+
+# QtQml 手动包含（QT += qml 模块检测在交叉编译时可能失败）
+INCLUDEPATH += $$[QT_INSTALL_HEADERS]/QtQml
+INCLUDEPATH += $$[QT_INSTALL_HEADERS]/QtQml/$$[QT_VERSION]
+LIBS += -lQt5Qml
 
 # FFmpeg 头文件路径（主机头文件平台无关，可用于交叉编译）
 INCLUDEPATH += $$PWD/include
