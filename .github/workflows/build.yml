@@ -36,12 +36,9 @@ jobs:
 
       - name: Prepare FFmpeg headers
         run: |
-          set -e
           mkdir -p plugin/include
-          # 用 pkg-config 获取 FFmpeg 头文件路径
           echo "=== pkg-config cflags ==="
           pkg-config --cflags libavformat libavcodec libavutil libswresample 2>&1 || true
-          # 直接从已知位置复制（Ubuntu 多架构路径）
           for dir in /usr/include/x86_64-linux-gnu/libav* /usr/include/libav*; do
             if [ -d "$dir" ]; then
               cp -r "$dir" plugin/include/
@@ -52,33 +49,50 @@ jobs:
           ls -la plugin/include/
           echo "=== swresample.h 位置 ==="
           find plugin/include -name "swresample.h" 2>/dev/null || echo "NOT FOUND in include"
-          dpkg -L libavutil-dev 2>/dev/null | grep -i swresample || echo "not in libavutil-dev"
-          dpkg -L libavcodec-dev 2>/dev/null | grep -i swresample || echo "not in libavcodec-dev"
 
-      - name: Verify qmake
+      - name: Verify environment
         run: |
-          set -e
           echo "=== qmake version ==="
           ./qt-5.15.2-for-aarch64-dictpen-linux/bin/qmake --version
           echo "=== gcc version ==="
           aarch64-dictpen-linux-gnu-g++ --version | head -1
+          echo "=== Qt include modules ==="
+          ls qt-5.15.2-for-aarch64-dictpen-linux/include/ | head -40
+          echo "=== QtQml exists? ==="
+          ls -d qt-5.15.2-for-aarch64-dictpen-linux/include/QtQml 2>/dev/null || echo "QtQml NOT FOUND"
+          echo "=== QtQuick exists? ==="
+          ls -d qt-5.15.2-for-aarch64-dictpen-linux/include/QtQuick 2>/dev/null || echo "QtQuick NOT FOUND"
+          echo "=== dictpen mkspec ==="
+          ls qt-5.15.2-for-aarch64-dictpen-linux/mkspecs/dictpen/ 2>/dev/null || echo "dictpen mkspec NOT FOUND"
           echo "=== dictpen-libs ==="
           ls dictpen-libs/ | head -20
 
       - name: Build with qmake
         run: |
-          set -e
           cd plugin
           echo "=== Running qmake ==="
-          ../qt-5.15.2-for-aarch64-dictpen-linux/bin/qmake NeteasePlayer.pro
+          ../qt-5.15.2-for-aarch64-dictpen-linux/bin/qmake NeteasePlayer.pro 2>&1 | tee qmake.log
+          QMAKE_EXIT=${PIPESTATUS[0]}
+          echo "=== qmake exit code: $QMAKE_EXIT ==="
+          if [ $QMAKE_EXIT -ne 0 ]; then
+            echo "=== qmake failed, full log ==="
+            cat qmake.log
+            exit 1
+          fi
           echo "=== qmake done, running make ==="
-          make -j$(nproc) 2>&1
+          make -j$(nproc) 2>&1 | tee make.log
+          MAKE_EXIT=${PIPESTATUS[0]}
+          echo "=== make exit code: $MAKE_EXIT ==="
+          if [ $MAKE_EXIT -ne 0 ]; then
+            echo "=== make failed, last 80 lines ==="
+            tail -80 make.log
+            exit 1
+          fi
           echo "=== make done ==="
           ls -lh build/
 
       - name: Strip debug symbols
         run: |
-          set -e
           aarch64-dictpen-linux-gnu-strip build/libnetease_player.so
           ls -lh build/libnetease_player.so
 
