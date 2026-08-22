@@ -39,7 +39,7 @@ jobs:
           mkdir -p plugin/include
           echo "=== pkg-config cflags ==="
           pkg-config --cflags libavformat libavcodec libavutil libswresample 2>&1 || true
-          for dir in /usr/include/x86_64-linux-gnu/libav* /usr/include/libav*; do
+          for dir in /usr/include/x86_64-linux-gnu/libav* /usr/include/x86_64-linux-gnu/libsw* /usr/include/libav* /usr/include/libsw*; do
             if [ -d "$dir" ]; then
               cp -r "$dir" plugin/include/
               echo "Copied: $dir"
