@@ -2,6 +2,7 @@
 #include <QObject>
 #include <QString>
 #include <QByteArray>
+#include <QAudio>
 #include <QAudioOutput>
 #include <QTimer>
 #include "AudioDecoder.h"
