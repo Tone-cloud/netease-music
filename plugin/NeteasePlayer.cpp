@@ -1,6 +1,7 @@
 #include "NeteasePlayer.h"
 #include <QDebug>
 #include <QAudioFormat>
+#include <QAudioDeviceInfo>
 #include <QProcess>
 
 NeteasePlayer::NeteasePlayer(QObject *parent)
