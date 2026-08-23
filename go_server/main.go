@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/md5"
 	"crypto/rand"
 	"embed"
 	"encoding/base64"
@@ -757,36 +758,56 @@ func handleUserPlaylist(w http.ResponseWriter, r *http.Request) {
 
 func handleCache(w http.ResponseWriter, r *http.Request) {
 	id := r.URL.Query().Get("id")
-	if id == "" {
-		writeError(w, "缺少 id")
+	urlParam := r.URL.Query().Get("url")
+
+	if id == "" && urlParam == "" {
+		writeError(w, "缺少 id 或 url")
 		return
 	}
+
+	var cacheFile string
+	var songUrl string
+
+	if urlParam != "" {
+		// 直接传 URL，用哈希作为缓存文件名
+		hash := md5.Sum([]byte(urlParam))
+		cacheFile = filepath.Join(cacheDir, fmt.Sprintf("%x.mp3", hash))
+		songUrl = urlParam
+	} else {
+		// 传 ID，先获取播放地址
+		cacheFile = filepath.Join(cacheDir, id+".mp3")
+	}
+
 	// 检查缓存
-	cacheFile := filepath.Join(cacheDir, id+".mp3")
 	if _, err := os.Stat(cacheFile); err == nil {
 		writeJSON(w, map[string]interface{}{"code": 200, "path": cacheFile, "cached": true})
 		return
 	}
-	// 获取播放地址并下载
-	body := fmt.Sprintf(`{"ids":"[%s]","level":"standard","encodeType":"aac"}`, id)
-	data, err := weapiPost("/weapi/song/enhance/player/url/v1", body)
-	if err != nil {
-		writeError(w, err.Error())
-		return
-	}
-	var result map[string]interface{}
-	json.Unmarshal(data, &result)
-	songs, _ := result["data"].([]interface{})
-	if len(songs) == 0 {
-		writeError(w, "无法获取播放地址")
-		return
-	}
-	song := songs[0].(map[string]interface{})
-	songUrl, _ := song["url"].(string)
+
+	// 如果是 ID 模式，先获取播放地址
 	if songUrl == "" {
-		writeError(w, "歌曲无可用播放地址（可能需要 VIP）")
-		return
+		body := fmt.Sprintf(`{"ids":"[%s]","level":"standard","encodeType":"aac"}`, id)
+		data, err := weapiPost("/weapi/song/enhance/player/url/v1", body)
+		if err != nil {
+			writeError(w, err.Error())
+			return
+		}
+		var result map[string]interface{}
+		json.Unmarshal(data, &result)
+		songs, _ := result["data"].([]interface{})
+		if len(songs) == 0 {
+			writeError(w, "无法获取播放地址")
+			return
+		}
+		song := songs[0].(map[string]interface{})
+		songUrl, _ = song["url"].(string)
+		if songUrl == "" {
+			writeError(w, "歌曲无可用播放地址（可能需要 VIP）")
+			return
+		}
 	}
+
+	fmt.Printf("[cache] downloading to %s\n", cacheFile)
 	// 下载
 	if err := downloadFile(songUrl, cacheFile); err != nil {
 		writeError(w, "下载失败: "+err.Error())
@@ -864,10 +885,17 @@ func handleDownloads(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]interface{}{"code": 200, "files": list})
 }
 
-// 下载文件
+// 下载文件（用带 utls 的 client，模拟浏览器 TLS 指纹）
 func downloadFile(url, dest string) error {
 	os.MkdirAll(filepath.Dir(dest), 0755)
-	resp, err := http.Get(url)
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+	req.Header.Set("Referer", "https://music.163.com/")
+	req.Header.Set("Accept", "*/*")
+	resp, err := client.Do(req)
 	if err != nil {
 		return err
 	}
@@ -909,7 +937,9 @@ func handleAudioProxy(w http.ResponseWriter, r *http.Request) {
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
 	req.Header.Set("Referer", "https://music.163.com/")
 	req.Header.Set("Accept", "*/*")
-	req.Header.Set("Range", r.Header.Get("Range")) // 透传 Range 请求，支持拖动进度条
+	// 注意：不透传 Range 请求，总是返回完整文件（200）
+	// FFmpeg 的 avformat_open_input() 对 206 分块响应支持不好，会报 Invalid data
+	// 跳转播放时 FFmpeg 会重新发 Range，但初始打开必须是完整文件
 
 	resp, err := client.Do(req)
 	if err != nil {
@@ -919,15 +949,17 @@ func handleAudioProxy(w http.ResponseWriter, r *http.Request) {
 	}
 	defer resp.Body.Close()
 
-	fmt.Printf("[audio-proxy] upstream status: %d, content-length: %s\n", resp.StatusCode, resp.Header.Get("Content-Length"))
+	fmt.Printf("[audio-proxy] upstream status: %d, content-type: %s, content-length: %s\n",
+		resp.StatusCode, resp.Header.Get("Content-Type"), resp.Header.Get("Content-Length"))
 
-	// 透传响应头
-	for key, values := range resp.Header {
-		for _, val := range values {
-			w.Header().Add(key, val)
-		}
+	// 只透传安全的响应头，不透传 Content-Encoding（避免 FFmpeg 不支持的压缩）
+	w.Header().Set("Content-Type", resp.Header.Get("Content-Type"))
+	if cl := resp.Header.Get("Content-Length"); cl != "" {
+		w.Header().Set("Content-Length", cl)
 	}
-	w.WriteHeader(resp.StatusCode)
+	w.Header().Set("Accept-Ranges", "bytes")
+	// 强制返回 200（即使上游返回 206），确保 FFmpeg 拿到完整文件
+	w.WriteHeader(200)
 
 	// 流式转发音频数据
 	written, err := io.Copy(w, resp.Body)

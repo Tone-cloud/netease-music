@@ -5,6 +5,8 @@
 #include <QAudio>
 #include <QAudioOutput>
 #include <QTimer>
+#include <QNetworkAccessManager>
+#include <QNetworkReply>
 #include "AudioDecoder.h"
 
 /**
@@ -81,17 +83,21 @@ private slots:
     void onDecoderError(const QString &msg);
     void onAudioStateChanged(QAudio::State state);
     void updatePositionTick();
+    void onCacheReply();
 
 private:
     void initAudioOutput();
     void cleanupAudio();
     void setPlaying(bool p);
     void setPaused(bool p);
+    void startPlayback(const QString &source);  // 实际开始播放（本地文件）
 
     AudioDecoder *m_decoder = nullptr;
     QAudioOutput *m_audioOutput = nullptr;
     QIODevice *m_audioBuf = nullptr;  // QAudioOutput 推模式缓冲区
     QTimer *m_positionTimer = nullptr;
+    QNetworkAccessManager *m_networkManager = nullptr;
+    QNetworkReply *m_cacheReply = nullptr;
 
     QString m_source;
     QString m_errorString;

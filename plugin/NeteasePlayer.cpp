@@ -4,6 +4,8 @@
 #include <QAudioDeviceInfo>
 #include <QProcess>
 #include <QUrl>
+#include <QJsonDocument>
+#include <QJsonObject>
 
 NeteasePlayer::NeteasePlayer(QObject *parent)
     : QObject(parent) {
@@ -17,6 +19,8 @@ NeteasePlayer::NeteasePlayer(QObject *parent)
     m_positionTimer = new QTimer(this);
     m_positionTimer->setInterval(250);
     connect(m_positionTimer, &QTimer::timeout, this, &NeteasePlayer::updatePositionTick);
+
+    m_networkManager = new QNetworkAccessManager(this);
 }
 
 NeteasePlayer::~NeteasePlayer() {
@@ -62,18 +66,77 @@ void NeteasePlayer::play(const QString &source) {
     }
     stop();
 
-    // 如果是网络 URL，通过 Go server 代理（解决 FFmpeg 直接访问 CDN 失败的问题）
-    QString playSource = source;
+    m_source = source;
+    emit sourceChanged(source);
+    m_errorString.clear();
+
+    // 如果是网络 URL，先通过 Go server 下载缓存到本地，再播放本地文件
+    // FFmpeg 直接播放 HTTP 流有问题（Invalid data found when processing input）
     if (source.startsWith("http://") || source.startsWith("https://")) {
         QUrl qurl(source);
         QByteArray encoded = qurl.toEncoded(QUrl::FullyEncoded);
-        playSource = QString("http://127.0.0.1:8001/audio?url=%1").arg(QString::fromUtf8(encoded));
-        qDebug() << "[NeteasePlayer] using proxy url:" << playSource;
+        QString cacheUrl = QString("http://127.0.0.1:8001/cache?url=%1").arg(QString::fromUtf8(encoded));
+        qDebug() << "[NeteasePlayer] requesting cache:" << cacheUrl;
+
+        QNetworkRequest request(QUrl(cacheUrl));
+        m_cacheReply = m_networkManager->get(request);
+        connect(m_cacheReply, &QNetworkReply::finished, this, &NeteasePlayer::onCacheReply);
+        return;
     }
 
-    m_source = playSource;
-    emit sourceChanged(playSource);
-    m_errorString.clear();
+    // 本地文件直接播放
+    startPlayback(source);
+}
+
+void NeteasePlayer::onCacheReply() {
+    if (!m_cacheReply) return;
+    QNetworkReply *reply = m_cacheReply;
+    m_cacheReply = nullptr;
+
+    if (reply->error() != QNetworkReply::NoError) {
+        m_errorString = "缓存下载失败: " + reply->errorString();
+        qWarning() << "[NeteasePlayer] cache request failed:" << reply->errorString();
+        emit errorOccurred(m_errorString);
+        reply->deleteLater();
+        return;
+    }
+
+    QByteArray data = reply->readAll();
+    reply->deleteLater();
+
+    // 解析 JSON 响应，获取本地文件路径
+    QJsonDocument doc = QJsonDocument::fromJson(data);
+    if (doc.isNull() || !doc.isObject()) {
+        m_errorString = "缓存响应解析失败";
+        qWarning() << "[NeteasePlayer] cache response parse failed:" << data;
+        emit errorOccurred(m_errorString);
+        return;
+    }
+
+    QJsonObject obj = doc.object();
+    if (obj.value("code").toInt() != 200) {
+        m_errorString = "缓存下载失败: " + obj.value("msg").toString();
+        qWarning() << "[NeteasePlayer] cache error:" << data;
+        emit errorOccurred(m_errorString);
+        return;
+    }
+
+    QString localPath = obj.value("path").toString();
+    bool cached = obj.value("cached").toBool();
+    qDebug() << "[NeteasePlayer] cache ready, local path:" << localPath << "cached:" << cached;
+
+    if (localPath.isEmpty()) {
+        m_errorString = "缓存路径为空";
+        emit errorOccurred(m_errorString);
+        return;
+    }
+
+    // 播放本地缓存文件
+    startPlayback(localPath);
+}
+
+void NeteasePlayer::startPlayback(const QString &source) {
+    qDebug() << "[NeteasePlayer] startPlayback, source:" << source;
 
     qDebug() << "[NeteasePlayer] initAudioOutput...";
     initAudioOutput();
@@ -91,7 +154,7 @@ void NeteasePlayer::play(const QString &source) {
     setPlaying(true);
     m_positionTimer->start();
     qDebug() << "[NeteasePlayer] starting decoder...";
-    m_decoder->start(playSource);
+    m_decoder->start(source);
 }
 
 void NeteasePlayer::pause() {
