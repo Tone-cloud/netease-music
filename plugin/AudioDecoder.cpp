@@ -2,7 +2,15 @@
 #include <QDebug>
 
 AudioDecoder::AudioDecoder(QObject *parent)
-    : QObject(parent) {}
+    : QObject(parent) {
+    // 初始化 FFmpeg 网络协议（只调用一次）
+    static bool networkInited = false;
+    if (!networkInited) {
+        avformat_network_init();
+        networkInited = true;
+        qDebug() << "[AudioDecoder] avformat_network_init done";
+    }
+}
 
 AudioDecoder::~AudioDecoder() {
     stop();
