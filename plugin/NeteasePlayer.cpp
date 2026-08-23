@@ -66,7 +66,7 @@ void NeteasePlayer::play(const QString &source) {
     QString playSource = source;
     if (source.startsWith("http://") || source.startsWith("https://")) {
         QUrl qurl(source);
-        QString encoded = qurl.toEncoded(QUrl::FullyEncoded);
+        QByteArray encoded = qurl.toEncoded(QUrl::FullyEncoded);
         playSource = QString("http://127.0.0.1:8001/audio?url=%1").arg(QString::fromUtf8(encoded));
         qDebug() << "[NeteasePlayer] using proxy url:" << playSource;
     }
