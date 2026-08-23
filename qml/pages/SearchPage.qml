@@ -28,14 +28,22 @@ Rectangle {
                 Text { anchors.centerIn: parent; text: "<"; color: Theme.textPrimary; font.pixelSize: Theme.fontNormal; font.bold: true }
                 MouseArea { anchors.fill: parent; onClicked: root.backClicked() }
             }
-            TextInput {
-                id: searchInput
+            Item {
                 anchors.verticalCenter: parent.verticalCenter
                 width: parent.width - 60; height: 24
-                color: Theme.textPrimary; font.pixelSize: Theme.fontNormal; font.family: Theme.fontFamily
-                placeholderText: "搜索歌曲、歌手、歌单"; placeholderTextColor: Theme.textMuted
-                selectByMouse: true
-                onAccepted: doSearch()
+                TextInput {
+                    id: searchInput
+                    anchors.fill: parent
+                    color: Theme.textPrimary; font.pixelSize: Theme.fontNormal; font.family: Theme.fontFamily
+                    onAccepted: doSearch()
+                }
+                Text {
+                    anchors.fill: parent; anchors.leftMargin: 1
+                    text: "搜索歌曲、歌手、歌单"
+                    color: Theme.textMuted; font.pixelSize: Theme.fontNormal; font.family: Theme.fontFamily
+                    verticalAlignment: Text.AlignVCenter
+                    visible: searchInput.text.length === 0
+                }
             }
             Rectangle {
                 width: 36; height: 22; anchors.verticalCenter: parent.verticalCenter

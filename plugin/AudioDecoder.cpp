@@ -9,6 +9,7 @@ AudioDecoder::~AudioDecoder() {
 }
 
 void AudioDecoder::start(const QString &path) {
+    qDebug() << "[AudioDecoder] start called, path:" << path;
     stop();
     m_path = path;
     m_stop.store(false);
@@ -129,14 +130,18 @@ bool AudioDecoder::initDecoder() {
 }
 
 void AudioDecoder::decodeLoop() {
+    qDebug() << "[AudioDecoder] decodeLoop started";
     if (!openInput() || !initDecoder()) {
+        qWarning() << "[AudioDecoder] openInput or initDecoder failed!";
         cleanup();
         return;
     }
+    qDebug() << "[AudioDecoder] init success, starting decode";
 
     AVPacket *pkt = av_packet_alloc();
     AVFrame *frame = av_frame_alloc();
     qint64 lastPosEmit = 0;
+    int frameCount = 0;
 
     while (!m_stop.load()) {
         // 暂停处理
@@ -204,11 +209,16 @@ void AudioDecoder::decodeLoop() {
                 int dataSize = converted * OUT_CHANNELS * av_get_bytes_per_sample(OUT_SAMPLE_FMT);
                 QByteArray pcm(reinterpret_cast<const char *>(m_resampleBuf), dataSize);
                 emit audioReady(pcm);
+                frameCount++;
+                if (frameCount % 50 == 0) {
+                    qDebug() << "[AudioDecoder] decoded" << frameCount << "frames, last pcm size:" << dataSize;
+                }
             }
             av_frame_unref(frame);
         }
     }
 
+    qDebug() << "[AudioDecoder] decode loop ended, total frames:" << frameCount;
     av_frame_free(&frame);
     av_packet_free(&pkt);
     cleanup();

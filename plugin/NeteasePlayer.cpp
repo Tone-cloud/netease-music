@@ -54,24 +54,32 @@ void NeteasePlayer::cleanupAudio() {
 }
 
 void NeteasePlayer::play(const QString &source) {
-    if (source.isEmpty()) return;
+    qDebug() << "[NeteasePlayer] play called, source:" << source;
+    if (source.isEmpty()) {
+        qWarning() << "[NeteasePlayer] source is empty, return";
+        return;
+    }
     stop();
     m_source = source;
     emit sourceChanged(source);
     m_errorString.clear();
 
+    qDebug() << "[NeteasePlayer] initAudioOutput...";
     initAudioOutput();
     if (!m_audioOutput || !m_audioBuf) {
         m_errorString = "无法初始化音频输出";
+        qWarning() << "[NeteasePlayer] audio output init failed!";
         emit errorOccurred(m_errorString);
         return;
     }
+    qDebug() << "[NeteasePlayer] audio output init success, volume:" << m_volume;
 
     m_position = 0;
     m_duration = 0;
     setPaused(false);
     setPlaying(true);
     m_positionTimer->start();
+    qDebug() << "[NeteasePlayer] starting decoder...";
     m_decoder->start(source);
 }
 
@@ -146,7 +154,11 @@ void NeteasePlayer::setVolume(qreal v) {
 void NeteasePlayer::onAudioReady(const QByteArray &pcm) {
     if (!m_audioBuf || m_paused || m_seeking) return;
     // 写入音频缓冲区，QAudioOutput 会自动播放
-    m_audioBuf->write(pcm);
+    qint64 written = m_audioBuf->write(pcm);
+    static int pcmCount = 0;
+    if (pcmCount++ % 50 == 0) {
+        qDebug() << "[NeteasePlayer] onAudioReady, pcm size:" << pcm.size() << "written:" << written << "count:" << pcmCount;
+    }
 }
 
 void NeteasePlayer::onDecoderPosition(qint64 ms) {
@@ -173,16 +185,18 @@ void NeteasePlayer::onDecoderFinished() {
 }
 
 void NeteasePlayer::onDecoderError(const QString &msg) {
+    qWarning() << "[NeteasePlayer] decoder error:" << msg;
     m_errorString = msg;
     emit errorOccurred(msg);
     stop();
 }
 
 void NeteasePlayer::onAudioStateChanged(QAudio::State state) {
+    qDebug() << "[NeteasePlayer] audio state changed:" << state;
     if (state == QAudio::StoppedState && m_audioOutput) {
         QAudio::Error err = m_audioOutput->error();
         if (err != QAudio::NoError && m_playing) {
-            qWarning() << "Audio output error:" << err;
+            qWarning() << "[NeteasePlayer] Audio output error:" << err;
         }
     }
 }
@@ -213,6 +227,8 @@ void NeteasePlayer::startServer(const QString &path) {
     if (path.isEmpty()) return;
     // 先杀掉旧进程
     QProcess::execute("pkill", QStringList() << "-f" << path);
+    // 确保有执行权限
+    QProcess::execute("chmod", QStringList() << "+x" << path);
     // 火忘式启动
     QProcess::startDetached(path, QStringList());
     qInfo() << "Started server:" << path;

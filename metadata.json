@@ -4,7 +4,7 @@
     "version": "3.0.0",
     "author": "Tone-cloud",
     "description": "词典笔网易云音乐客户端，C++播放器(FFmpeg+QAudioOutput)+Go server+QML，支持登录/搜索/歌单/歌词/下载",
-    "icon": "file://userdisk/PenMods/plugins/netease_music/icon.png",
+    "icon": "file:///userdisk/PenMods/plugins/com.netease.music/icon.png",
     "main_qml": "qml/main.qml",
     "main_so": "libnetease_player.so"
 }

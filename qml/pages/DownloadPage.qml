@@ -39,7 +39,8 @@ Rectangle {
 
     // 空状态
     Text {
-        anchors.centerIn: parent
+        anchors.top: parent.top; anchors.topMargin: 60
+        anchors.horizontalCenter: parent.horizontalCenter
         text: root.loading ? "加载中..." : "暂无下载歌曲"
         color: Theme.textMuted; font.pixelSize: Theme.fontSmall; font.family: Theme.fontFamily
         visible: root.downloads.length === 0

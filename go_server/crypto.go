@@ -5,6 +5,7 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
+	"encoding/hex"
 	"math/big"
 	"strings"
 )
@@ -97,4 +98,19 @@ func weapiEncrypt(jsonStr string) (params, encSecKey string) {
 	params = aesEncrypt(params, secKey)
 	encSecKey = rsaEncrypt(secKey)
 	return
+}
+
+// Linuxapi 加密：AES-128-ECB，返回大写十六进制 eparams
+func linuxapiEncrypt(jsonStr string) string {
+	key, _ := hex.DecodeString("72466742266828288510842306186348")
+	block, _ := aes.NewCipher(key)
+	// PKCS7 填充
+	pad := block.BlockSize() - len(jsonStr)%block.BlockSize()
+	jsonStr += strings.Repeat(string(rune(pad)), pad)
+	// ECB 模式（分块加密）
+	out := make([]byte, len(jsonStr))
+	for i := 0; i < len(jsonStr); i += block.BlockSize() {
+		block.Encrypt(out[i:i+block.BlockSize()], []byte(jsonStr)[i:i+block.BlockSize()])
+	}
+	return strings.ToUpper(hex.EncodeToString(out))
 }

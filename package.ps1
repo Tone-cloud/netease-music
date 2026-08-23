@@ -12,7 +12,8 @@ $files = @(
     "$root\metadata.json",
     "$root\server",
     "$root\icon.png",
-    "$root\README.md"
+    "$root\README.md",
+    "$root\cookies.example.json"
 )
 
 # 检查 libnetease_player.so 是否存在

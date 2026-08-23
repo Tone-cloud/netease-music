@@ -10,6 +10,7 @@ Rectangle {
 
     signal backClicked()
     signal loginSuccess(var user)
+    signal switchToPhoneLogin()
 
     property string qrKey: ""
     property string qrImage: ""
@@ -30,13 +31,21 @@ Rectangle {
             }
             Text { anchors.verticalCenter: parent.verticalCenter; text: "登录"; color: Theme.textPrimary; font.pixelSize: Theme.fontNormal; font.bold: true; font.family: Theme.fontFamily }
         }
+        // 右上角手机登录按钮
+        Text {
+            anchors.right: parent.right; anchors.rightMargin: 8
+            anchors.verticalCenter: parent.verticalCenter
+            text: "手机登录"
+            color: Theme.accent; font.pixelSize: Theme.fontSmall; font.family: Theme.fontFamily
+            MouseArea { anchors.fill: parent; anchors.margins: -4; onClicked: root.switchToPhoneLogin() }
+        }
     }
 
     Column {
-        anchors.centerIn: parent; spacing: Theme.spacingM
+        anchors.centerIn: parent; spacing: Theme.spacingS
         // 二维码区域
         Rectangle {
-            width: 80; height: 80
+            width: 70; height: 70
             color: "white"; radius: Theme.radiusM
             border.color: Theme.divider; border.width: 1
             Text {
@@ -67,7 +76,7 @@ Rectangle {
         }
 
         Rectangle {
-            width: 60; height: 24
+            width: 56; height: 22
             color: Theme.accent; radius: Theme.radiusM
             anchors.horizontalCenter: parent.horizontalCenter
             Text { anchors.centerIn: parent; text: "刷新"; color: "white"; font.pixelSize: Theme.fontSmall; font.family: Theme.fontFamily }
@@ -86,50 +95,73 @@ Rectangle {
     function startLogin() {
         root.loginStatus = "获取二维码..."
         root.qrImage = ""
+        console.log("[Login] startLogin, baseUrl=" + ApiClient.baseUrl)
         ApiClient.loginQrKey(function(d) {
-            if (d.code === 200 && d.data && d.data.unikey) {
-                root.qrKey = d.data.unikey
+            console.log("[Login] qrKey response: " + JSON.stringify(d))
+            if (d && d.code === 200 && d.unikey) {
+                root.qrKey = d.unikey
                 createQr()
             } else {
-                root.loginStatus = "获取 key 失败"
+                root.loginStatus = "获取 key 失败: " + (d ? JSON.stringify(d) : "null")
             }
-        }, function(e) { root.loginStatus = "网络错误: " + e })
+        }, function(e) {
+            console.log("[Login] qrKey error: " + e)
+            root.loginStatus = "网络错误: " + e
+        })
     }
 
     function createQr() {
+        console.log("[Login] createQr, key=" + root.qrKey)
         ApiClient.loginQrCreate(root.qrKey, function(d) {
-            if (d.code === 200 && d.data) {
-                if (d.data.qrimg) {
+            console.log("[Login] qrCreate response: " + JSON.stringify(d).substring(0, 300))
+            if (d && d.code === 200) {
+                if (d.qrimg) {
                     // 去掉 data:image/png;base64, 前缀
-                    var img = d.data.qrimg
+                    var img = d.qrimg
                     if (img.indexOf(",") >= 0) img = img.substring(img.indexOf(",") + 1)
                     root.qrImage = img
+                    console.log("[Login] qrImage length=" + img.length)
+                } else {
+                    console.log("[Login] no qrimg field in response")
                 }
                 root.loginStatus = "请扫码"
                 root.polling = true
                 pollTimer.start()
             } else {
-                root.loginStatus = "生成二维码失败"
+                root.loginStatus = "生成二维码失败: " + (d ? JSON.stringify(d).substring(0, 100) : "null")
             }
-        }, function(e) { root.loginStatus = "网络错误: " + e })
+        }, function(e) {
+            console.log("[Login] qrCreate error: " + e)
+            root.loginStatus = "网络错误: " + e
+        })
     }
 
     function checkLoginStatus() {
         if (!root.qrKey) return
         ApiClient.loginQrCheck(root.qrKey, function(d) {
+            console.log("[Login] qrCheck response: " + JSON.stringify(d).substring(0, 300))
             if (d.code === 803) {
-                // 登录成功
+                // 官方文档：803 为授权登录成功(803 状态码下会返回 cookies)
                 root.polling = false
                 pollTimer.stop()
                 root.loginStatus = "登录成功"
+                console.log("[Login] login success (code 803)")
                 // 获取用户信息
                 ApiClient.loginStatus(function(ud) {
+                    console.log("[Login] loginStatus response: " + JSON.stringify(ud).substring(0, 300))
                     if (ud.code === 200 && ud.data && ud.data.profile) {
                         root.loginSuccess(ud.data.profile)
+                    } else if (ud.profile) {
+                        root.loginSuccess(ud.profile)
+                    } else if (ud.account && ud.profile) {
+                        root.loginSuccess(ud.profile)
                     } else {
                         root.loginSuccess({ nickname: "用户" })
                     }
-                }, null)
+                }, function(e) {
+                    console.log("[Login] loginStatus error: " + e)
+                    root.loginSuccess({ nickname: "用户" })
+                })
             } else if (d.code === 800) {
                 root.loginStatus = "二维码过期，请刷新"
                 root.polling = false
@@ -138,8 +170,14 @@ Rectangle {
                 root.loginStatus = "等待扫码..."
             } else if (d.code === 802) {
                 root.loginStatus = "扫码成功，等待确认"
+            } else if (d.code === 8821) {
+                root.loginStatus = "登录被风控，请刷新重试"
+                root.polling = false
+                pollTimer.stop()
             }
-        }, null)
+        }, function(e) {
+            console.log("[Login] qrCheck error: " + e)
+        })
     }
 
     Component.onCompleted: startLogin()

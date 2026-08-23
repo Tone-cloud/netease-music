@@ -114,6 +114,16 @@ QtObject {
         get("/login/qr/check?key=" + key, onSuccess, onError)
     }
 
+    // 发送验证码
+    function captchaSent(phone, onSuccess, onError) {
+        get("/captcha/sent?phone=" + phone, onSuccess, onError)
+    }
+
+    // 手机验证码登录
+    function loginCellphone(phone, captcha, onSuccess, onError) {
+        get("/login/cellphone?phone=" + phone + "&captcha=" + captcha, onSuccess, onError)
+    }
+
     // 登录状态
     function loginStatus(onSuccess, onError) {
         get("/login/status", onSuccess, onError)

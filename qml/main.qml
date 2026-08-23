@@ -13,50 +13,228 @@ Rectangle {
     signal backButtonClicked()
 
     // ── 常量 ──
-    property string pluginDir: "/userdisk/PenMods/plugins/netease_music"
+    property string pluginDir: "/userdisk/PenMods/plugins/com.netease.music"
     property string serverBin: pluginDir + "/server"
     property string serverUrl: "http://127.0.0.1:8001"
 
-    // ── 全局播放器（C++ 插件提供）──
+    // ── 全局播放器 ──
     NeteasePlayer {
         id: player
         volume: 0.8
-        onFinished: {
-            if (root.playlist.length > 0) root.playNext()
-        }
-        onErrorOccurred: function(msg) {
-            root.showToast("播放错误: " + msg)
-        }
+        onFinished: { if (root.playlist.length > 0) root.playNext() }
+        onErrorOccurred: function(msg) { root.showToast("播放错误: " + msg) }
     }
 
-    // ── 页面路由 ──
+    // ── 页面路由（参考 BiliPocket：独立 Loader + visible 控制）──
     property string currentPage: "home"
     property var pageStack: []
-    property var pageProps: ({})
+    property bool _animating: false
+
+    // 页面参数（通过 root 属性传递）
+    property string playlistId: ""
+    property int playlistIdx: 0
+    property var currentSong: null
+    property var playlist: []
+    property int currentIndex: -1
+    property var userInfo: null
+    property bool isLoggedIn: false
+    property string serverStatus: "启动中..."
+    property var globalPlayer: player   // 避免与子页面 player 属性命名冲突
+
+    function stackContains(page) {
+        for (var i = 0; i < pageStack.length; ++i) {
+            if (pageStack[i] && pageStack[i].page === page) return true
+        }
+        return false
+    }
 
     function navigateTo(page, props) {
-        pageStack.push({ page: currentPage, props: pageProps })
+        if (_animating) return
+        var newStack = pageStack.slice(0)
+        newStack.push({ page: currentPage, props: captureProps(currentPage) })
+        pageStack = newStack
+        applyProps(page, props || {})
+        _animating = true
         currentPage = page
-        pageProps = props || ({})
+        pageTransition.restart()
     }
 
     function goBack() {
+        if (_animating) return
         if (pageStack.length > 0) {
-            var entry = pageStack.pop()
-            currentPage = entry.page
-            pageProps = entry.props
+            var newStack = pageStack.slice(0)
+            var prev = newStack.pop()
+            applyProps(prev.page, prev.props || {})
+            _animating = true
+            currentPage = prev.page
+            pageStack = newStack
+            pageTransitionBack.restart()
+        } else if (currentPage !== "home") {
+            _animating = true
+            currentPage = "home"
+            pageTransitionBack.restart()
         } else {
             backButtonClicked()
         }
     }
 
-    // ── 全局状态 ──
-    property var playlist: []
-    property int currentIndex: -1
-    property var currentSong: null
-    property var userInfo: null
-    property bool isLoggedIn: false
-    property string serverStatus: "启动中..."
+    function captureProps(page) {
+        if (page === "playlist") return { id: playlistId, idx: playlistIdx }
+        return {}
+    }
+
+    function applyProps(page, props) {
+        if (!props) return
+        if (page === "playlist") {
+            playlistId = props.id || ""
+            playlistIdx = props.idx || 0
+        }
+    }
+
+    // ── 页面切换动画（参考 BiliPocket）──
+    Item {
+        id: pageContainer
+        anchors.fill: parent
+        opacity: 1
+        transform: Translate { id: pageTranslate; x: 0 }
+
+        SequentialAnimation {
+            id: pageTransition
+            ScriptAction { script: { pageContainer.opacity = 1; pageTranslate.x = 12 } }
+            ParallelAnimation {
+                NumberAnimation { target: pageContainer; property: "opacity"; from: 0.96; to: 1; duration: 150; easing.type: Easing.OutQuad }
+                NumberAnimation { target: pageTranslate; property: "x"; from: 12; to: 0; duration: 150; easing.type: Easing.OutCubic }
+            }
+            onFinished: root._animating = false
+        }
+
+        SequentialAnimation {
+            id: pageTransitionBack
+            ScriptAction { script: { pageContainer.opacity = 1; pageTranslate.x = -12 } }
+            ParallelAnimation {
+                NumberAnimation { target: pageContainer; property: "opacity"; from: 0.96; to: 1; duration: 150; easing.type: Easing.OutQuad }
+                NumberAnimation { target: pageTranslate; property: "x"; from: -12; to: 0; duration: 150; easing.type: Easing.OutCubic }
+            }
+            onFinished: root._animating = false
+        }
+
+        // ── 首页 ──
+        Loader {
+            active: true
+            visible: currentPage === "home"
+            anchors.fill: parent
+            sourceComponent: Component {
+                Pages.HomePage {
+                    isLoggedIn: root.isLoggedIn
+                    userName: root.userInfo ? root.userInfo.nickname : ""
+                    onBackClicked: root.backButtonClicked()
+                    onOpenPlaylist: function(id) { root.navigateTo("playlist", { id: id }) }
+                    onOpenSearch: root.navigateTo("search")
+                    onOpenLogin: root.navigateTo("user")
+                    onOpenUser: root.navigateTo("user")
+                    onOpenToplist: function(idx) { root.navigateTo("playlist", { id: "top_" + idx, idx: idx }) }
+                    onPlaySong: function(song) { root.playSong(song) }
+                }
+            }
+        }
+
+        // ── 搜索页 ──
+        Loader {
+            active: currentPage === "search" || root.stackContains("search")
+            visible: currentPage === "search"
+            anchors.fill: parent
+            sourceComponent: Component {
+                Pages.SearchPage {
+                    onBackClicked: root.goBack()
+                    onPlaySong: function(song) { root.playSong(song) }
+                }
+            }
+        }
+
+        // ── 歌单页 ──
+        Loader {
+            active: currentPage === "playlist" || root.stackContains("playlist")
+            visible: currentPage === "playlist"
+            anchors.fill: parent
+            sourceComponent: Component {
+                Pages.PlaylistPage {
+                    playlistId: root.playlistId
+                    onBackClicked: root.goBack()
+                    onPlaySong: function(song) { root.playSong(song) }
+                    onPlayAll: function(songs) { root.playAll(songs) }
+                    onLoaded: function(item) {
+                        var id = root.playlistId
+                        if (id === "daily") item.load("daily")
+                        else if (id && id.indexOf("top_") === 0) {
+                            ApiClient.topListDetail(root.playlistIdx, function(d) {
+                                if (d.code === 200 && d.playlist) {
+                                    item.playlistName = d.playlist.name
+                                    item.parseSongs(d.playlist.tracks || [])
+                                }
+                            }, null)
+                        } else if (id) item.load(id)
+                    }
+                }
+            }
+        }
+
+        // ── 播放器页 ──
+        Loader {
+            active: currentPage === "player"
+            visible: currentPage === "player"
+            anchors.fill: parent
+            sourceComponent: Component {
+                Pages.PlayerPage {
+            player: root.globalPlayer
+                    currentSong: root.currentSong
+                    onBackClicked: root.goBack()
+                    onPrevSong: root.playPrev()
+                    onNextSong: root.playNext()
+                    onDownloadRequested: function(song) { root.downloadSong(song) }
+                }
+            }
+        }
+
+        // ── 用户页 ──
+        Loader {
+            active: currentPage === "user" || root.stackContains("user")
+            visible: currentPage === "user"
+            anchors.fill: parent
+            sourceComponent: Component {
+                Pages.UserPage {
+                    userInfo: root.userInfo
+                    onBackClicked: root.goBack()
+                    onOpenLogin: root.navigateTo("login")
+                    onOpenPlaylist: function(id) { root.navigateTo("playlist", { id: id }) }
+                    onOpenDownloads: root.navigateTo("download")
+                    onLogout: function() {
+                        ApiClient.logout(function() {
+                            root.isLoggedIn = false
+                            root.userInfo = null
+                            root.showToast("已退出登录")
+                            root.goBack()
+                        })
+                    }
+                }
+            }
+        }
+
+        // ── 下载页 ──
+        Loader {
+            active: currentPage === "download"
+            visible: currentPage === "download"
+            anchors.fill: parent
+            sourceComponent: Component {
+                Pages.DownloadPage {
+                    onBackClicked: root.goBack()
+                    onPlayLocal: function(path, name) {
+                        player.play(path)
+                        root.showToast("正在播放: " + name)
+                    }
+                }
+            }
+        }
+    }
 
     // ── 启动 Go server ──
     function startServer() {
@@ -89,9 +267,9 @@ Rectangle {
 
     function checkLogin() {
         ApiClient.loginStatus(function(d) {
-            if (d.code === 200 && d.data && d.data.profile) {
+            if (d.code === 200 && d.profile) {
                 isLoggedIn = true
-                userInfo = d.data.profile
+                userInfo = d.profile
             }
         }, null)
     }
@@ -148,7 +326,7 @@ Rectangle {
         id: toast
         anchors.bottom: parent.bottom; anchors.horizontalCenter: parent.horizontalCenter
         anchors.bottomMargin: 55
-        width: childrenRect.width + 16; height: 24
+        width: toastText.implicitWidth + 16; height: 24
         color: "#cc000000"; radius: 12
         visible: false
         Text { id: toastText; anchors.centerIn: parent; color: "white"; font.pixelSize: Theme.fontSmall; font.family: Theme.fontFamily }
@@ -163,115 +341,6 @@ Rectangle {
         color: serverStatus === "已连接" ? Theme.success : Theme.warning
         font.pixelSize: Theme.fontTiny
         visible: currentPage === "home"
-    }
-
-    // ── 页面容器 ──
-    StackView {
-        id: stack
-        anchors.fill: parent
-        initialItem: homeComp
-
-        Component {
-            id: homeComp
-            Pages.HomePage {
-                isLoggedIn: root.isLoggedIn
-                userName: root.userInfo ? root.userInfo.nickname : ""
-                onBackClicked: root.backButtonClicked()
-                onOpenPlaylist: function(id) { stack.push(playlistComp, { id: id }) }
-                onOpenSearch: stack.push(searchComp)
-                onOpenLogin: stack.push(loginComp)
-                onOpenUser: stack.push(userComp)
-                onOpenToplist: function(idx) { stack.push(playlistComp, { id: "top_" + idx, idx: idx }) }
-                onPlaySong: function(song) { root.playSong(song) }
-            }
-        }
-
-        Component {
-            id: searchComp
-            Pages.SearchPage {
-                onBackClicked: stack.pop()
-                onPlaySong: function(song) { root.playSong(song) }
-            }
-        }
-
-        Component {
-            id: playlistComp
-            Pages.PlaylistPage {
-                onBackClicked: stack.pop()
-                onPlaySong: function(song) { root.playSong(song) }
-                onPlayAll: function(songs) { root.playAll(songs) }
-                onLoaded: function(item) {
-                    var props = item.properties || {}
-                    if (props.id === "daily") item.load("daily")
-                    else if (props.id && props.id.indexOf("top_") === 0) {
-                        ApiClient.topListDetail(props.idx, function(d) {
-                            if (d.code === 200 && d.playlist) {
-                                item.playlistName = d.playlist.name
-                                item.parseSongs(d.playlist.tracks || [])
-                            }
-                        }, null)
-                    } else if (props.id) item.load(props.id)
-                }
-            }
-        }
-
-        Component {
-            id: playerComp
-            Pages.PlayerPage {
-                player: root.player
-                onBackClicked: stack.pop()
-                onPrevSong: root.playPrev()
-                onNextSong: root.playNext()
-                onDownloadRequested: function(song) { root.downloadSong(song) }
-            }
-        }
-
-        Component {
-            id: loginComp
-            Pages.LoginPage {
-                onBackClicked: stack.pop()
-                onLoginSuccess: function(user) {
-                    root.isLoggedIn = true
-                    root.userInfo = user
-                    root.showToast("登录成功: " + (user.nickname || ""))
-                    stack.pop()
-                }
-            }
-        }
-
-        Component {
-            id: userComp
-            Pages.UserPage {
-                userInfo: root.userInfo
-                onBackClicked: stack.pop()
-                onOpenPlaylist: function(id) { stack.push(playlistComp, { id: id }) }
-                onOpenDownloads: stack.push(downloadComp)
-                onLogout: function() {
-                    ApiClient.logout(function() {
-                        root.isLoggedIn = false
-                        root.userInfo = null
-                        root.showToast("已退出登录")
-                        stack.pop()
-                    })
-                }
-            }
-        }
-
-        Component {
-            id: downloadComp
-            Pages.DownloadPage {
-                onBackClicked: stack.pop()
-                onPlayLocal: function(path, name) {
-                    root.player.play(path)
-                    root.showToast("正在播放: " + name)
-                }
-            }
-        }
-    }
-
-    // currentPage 同步（用于状态显示）
-    Binding on currentPage {
-        value: stack.currentItem.objectName || "home"
     }
 
     Component.onCompleted: startServer()

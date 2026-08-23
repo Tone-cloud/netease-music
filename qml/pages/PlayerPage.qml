@@ -1,4 +1,5 @@
 import QtQuick 2.12
+import NeteasePlayer 1.0
 import "../components"
 
 Rectangle {
@@ -13,7 +14,7 @@ Rectangle {
     signal nextSong()
     signal downloadRequested(var song)
 
-    property var player: null          // 全局 NeteasePlayer 实例
+    property NeteasePlayer player: null   // 全局 NeteasePlayer 实例
     property var currentSong: null
     property string lyricText: ""
     property var lyricLines: []
@@ -23,7 +24,7 @@ Rectangle {
 
     // 监听播放器信号
     Connections {
-        target: root.player
+        target: player
         function onPositionChanged(ms) { updateLyric(ms) }
         function onFinished() { root.nextSong() }
         function onErrorOccurred(msg) { statusText.text = "错误: " + msg }
@@ -31,6 +32,7 @@ Rectangle {
 
     // 当 currentSong 变化时，获取播放地址并播放
     onCurrentSongChanged: {
+        console.log("[PlayerPage] currentSong changed:", currentSong ? currentSong.name : "null", "player:", player ? "valid" : "null")
         if (currentSong && currentSong.id) {
             loadAndPlay()
         }
@@ -38,6 +40,7 @@ Rectangle {
 
     function loadAndPlay() {
         if (!currentSong || !currentSong.id) return
+        console.log("[PlayerPage] loadAndPlay start, song:", currentSong.name)
         root.loadingUrl = true
         statusText.text = "获取播放地址..."
         lyricText = ""
@@ -49,15 +52,23 @@ Rectangle {
             if (d.code === 200 && d.data && d.data[0] && d.data[0].url) {
                 root.playUrl = d.data[0].url
                 statusText.text = "正在播放: " + currentSong.name
+                console.log("[PlayerPage] got url, calling player.play, player valid:", player ? "yes" : "NO")
                 // 用 FFmpeg 直接播放 HTTP URL
-                root.player.play(root.playUrl)
+                if (player) {
+                    console.log("[PlayerPage] calling player.play with url:", root.playUrl)
+                    player.play(root.playUrl)
+                } else {
+                    console.log("[PlayerPage] ERROR: player is null!")
+                }
                 loadLyric(currentSong.id)
             } else {
                 statusText.text = "无法播放（可能需要 VIP）"
+                console.log("[PlayerPage] no url in response")
             }
         }, function(e) {
             root.loadingUrl = false
             statusText.text = "获取地址失败: " + e
+            console.log("[PlayerPage] songUrl error:", e)
         })
     }
 
@@ -147,7 +158,7 @@ Rectangle {
             border.color: Theme.accent; border.width: 1
             Text { anchors.centerIn: parent; text: "♫"; color: Theme.accentSoft; font.pixelSize: 28 }
             RotationAnimation on rotation {
-                running: root.player && root.player.playing
+                running: player ? player.playing : false
                 duration: 6000; from: 0; to: 360; loops: Animation.Infinite
             }
         }
@@ -182,7 +193,7 @@ Rectangle {
             anchors.fill: parent; anchors.leftMargin: 6; anchors.rightMargin: 6; spacing: 4
             Text {
                 anchors.verticalCenter: parent.verticalCenter
-                text: formatTime(root.player ? root.player.position : 0)
+                text: formatTime(player ? player.position : 0)
                 color: Theme.textMuted; font.pixelSize: Theme.fontTiny
             }
             Rectangle {
@@ -191,22 +202,22 @@ Rectangle {
                 color: Theme.bgCard; radius: 1
                 Rectangle {
                     height: parent.height; radius: 1; color: Theme.accent
-                    width: root.player && root.player.duration > 0
-                        ? (root.player.position / root.player.duration) * parent.width : 0
+                    width: (player && player.duration > 0)
+                        ? (player.position / player.duration) * parent.width : 0
                 }
                 MouseArea {
                     anchors.fill: parent
                     onClicked: {
-                        if (root.player && root.player.duration > 0) {
+                        if (player && player.duration > 0) {
                             var ratio = mouse.x / width
-                            root.player.seek(Math.floor(ratio * root.player.duration))
+                            player.seek(Math.floor(ratio * player.duration))
                         }
                     }
                 }
             }
             Text {
                 anchors.verticalCenter: parent.verticalCenter
-                text: formatTime(root.player ? root.player.duration : 0)
+                text: formatTime(player ? player.duration : 0)
                 color: Theme.textMuted; font.pixelSize: Theme.fontTiny
             }
         }
@@ -229,19 +240,19 @@ Rectangle {
             // 播放/暂停
             Rectangle {
                 width: 38; height: 38
-                color: root.player && root.player.playing ? Theme.accent : Theme.success
+                color: (player && player.playing) ? Theme.accent : Theme.success
                 radius: 19
                 Text {
                     anchors.centerIn: parent
-                    text: root.player && root.player.playing ? "⏸" : "▶"
+                    text: (player && player.playing) ? "⏸" : "▶"
                     color: "white"; font.pixelSize: 14
                 }
                 MouseArea {
                     anchors.fill: parent
                     onClicked: {
-                        if (root.player) {
-                            if (root.player.playing) root.player.pause()
-                            else root.player.resume()
+                        if (player) {
+                            if (player.playing) player.pause()
+                            else player.resume()
                         }
                     }
                 }
@@ -250,7 +261,7 @@ Rectangle {
             Rectangle {
                 width: 32; height: 32; color: Theme.bgCard; radius: 16
                 Text { anchors.centerIn: parent; text: "⏹"; color: Theme.warning; font.pixelSize: 10 }
-                MouseArea { anchors.fill: parent; onClicked: if (root.player) root.player.stop() }
+                MouseArea { anchors.fill: parent; onClicked: if (player) player.stop() }
             }
             // 下一首
             Rectangle {
