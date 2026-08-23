@@ -147,6 +147,7 @@ func main() {
 	http.HandleFunc("/download", handleDownload)
 	http.HandleFunc("/cache", handleCache)
 	http.HandleFunc("/downloads", handleDownloads)
+	http.HandleFunc("/audio", handleAudioProxy)
 
 	// 异步初始化 cookie（避免阻塞 server 启动导致插件连接超时）
 	go initCookies()
@@ -887,4 +888,52 @@ func downloadFile(url, dest string) error {
 func sanitizeFilename(name string) string {
 	replacer := strings.NewReplacer("/", "_", "\\", "_", ":", "_", "*", "_", "?", "_", "\"", "_", "<", "_", ">", "_", "|", "_")
 	return strings.TrimSpace(replacer.Replace(name))
+}
+
+// 音频流代理：C++ 播放器从本地 127.0.0.1:8001/audio?url=xxx 读取，Go 转发到网易云 CDN
+// 解决 FFmpeg 直接访问 CDN 失败的问题（User-Agent/Referer/TLS指纹等）
+func handleAudioProxy(w http.ResponseWriter, r *http.Request) {
+	audioUrl := r.URL.Query().Get("url")
+	if audioUrl == "" {
+		http.Error(w, "missing url", 400)
+		return
+	}
+	fmt.Printf("[audio-proxy] proxying: %s\n", audioUrl[:min(80, len(audioUrl))])
+
+	req, err := http.NewRequest("GET", audioUrl, nil)
+	if err != nil {
+		http.Error(w, "create request failed: "+err.Error(), 500)
+		return
+	}
+	// 模拟浏览器请求头，绕过 CDN 风控
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+	req.Header.Set("Referer", "https://music.163.com/")
+	req.Header.Set("Accept", "*/*")
+	req.Header.Set("Range", r.Header.Get("Range")) // 透传 Range 请求，支持拖动进度条
+
+	resp, err := client.Do(req)
+	if err != nil {
+		fmt.Printf("[audio-proxy] request failed: %v\n", err)
+		http.Error(w, "upstream failed: "+err.Error(), 502)
+		return
+	}
+	defer resp.Body.Close()
+
+	fmt.Printf("[audio-proxy] upstream status: %d, content-length: %s\n", resp.StatusCode, resp.Header.Get("Content-Length"))
+
+	// 透传响应头
+	for key, values := range resp.Header {
+		for _, val := range values {
+			w.Header().Add(key, val)
+		}
+	}
+	w.WriteHeader(resp.StatusCode)
+
+	// 流式转发音频数据
+	written, err := io.Copy(w, resp.Body)
+	if err != nil {
+		fmt.Printf("[audio-proxy] copy error after %d bytes: %v\n", written, err)
+	} else {
+		fmt.Printf("[audio-proxy] done, %d bytes\n", written)
+	}
 }

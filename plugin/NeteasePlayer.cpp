@@ -3,6 +3,7 @@
 #include <QAudioFormat>
 #include <QAudioDeviceInfo>
 #include <QProcess>
+#include <QUrl>
 
 NeteasePlayer::NeteasePlayer(QObject *parent)
     : QObject(parent) {
@@ -60,8 +61,18 @@ void NeteasePlayer::play(const QString &source) {
         return;
     }
     stop();
-    m_source = source;
-    emit sourceChanged(source);
+
+    // 如果是网络 URL，通过 Go server 代理（解决 FFmpeg 直接访问 CDN 失败的问题）
+    QString playSource = source;
+    if (source.startsWith("http://") || source.startsWith("https://")) {
+        QUrl qurl(source);
+        QString encoded = qurl.toEncoded(QUrl::FullyEncoded);
+        playSource = QString("http://127.0.0.1:8001/audio?url=%1").arg(QString::fromUtf8(encoded));
+        qDebug() << "[NeteasePlayer] using proxy url:" << playSource;
+    }
+
+    m_source = playSource;
+    emit sourceChanged(playSource);
     m_errorString.clear();
 
     qDebug() << "[NeteasePlayer] initAudioOutput...";
@@ -80,7 +91,7 @@ void NeteasePlayer::play(const QString &source) {
     setPlaying(true);
     m_positionTimer->start();
     qDebug() << "[NeteasePlayer] starting decoder...";
-    m_decoder->start(source);
+    m_decoder->start(playSource);
 }
 
 void NeteasePlayer::pause() {
