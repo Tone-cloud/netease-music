@@ -11,9 +11,7 @@ AudioDecoder::AudioDecoder(QObject *parent)
         av_register_all();
         avformat_network_init();
         ffmpegInited = true;
-        qDebug() << "[AudioDecoder] FFmpeg initialized, version:" << av_version_info();
-        qDebug() << "[AudioDecoder] avcodec version:" << avcodec_version();
-        qDebug() << "[AudioDecoder] avformat version:" << avformat_version();
+        qDebug() << "[AudioDecoder] FFmpeg initialized (av_register_all + avformat_network_init)";
     }
 }
 
