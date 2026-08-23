@@ -6,6 +6,8 @@
 #include <QUrl>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <dlfcn.h>
+#include <QFileInfo>
 
 NeteasePlayer::NeteasePlayer(QObject *parent)
     : QObject(parent) {
@@ -132,8 +134,8 @@ void NeteasePlayer::onCacheReply() {
         return;
     }
 
-    // 播放本地缓存文件
-    startPlayback(localPath);
+    // 使用系统原生播放器播放本地缓存文件
+    playWithSystemPlayer(localPath);
 }
 
 void NeteasePlayer::startPlayback(const QString &source) {
@@ -312,4 +314,125 @@ void NeteasePlayer::startServer(const QString &path) {
 void NeteasePlayer::execDetached(const QString &cmd) {
     if (cmd.isEmpty()) return;
     QProcess::startDetached("sh", QStringList() << "-c" << cmd);
+}
+
+void NeteasePlayer::playWithSystemPlayer(const QString &filePath) {
+    qDebug() << "[NeteasePlayer] playWithSystemPlayer, file:" << filePath;
+
+    if (filePath.isEmpty()) {
+        emit errorOccurred("文件路径为空");
+        return;
+    }
+
+    QFileInfo fi(filePath);
+    if (!fi.exists()) {
+        emit errorOccurred("文件不存在: " + filePath);
+        return;
+    }
+
+    // 函数指针类型定义
+    typedef void* (*InstanceFunc)();
+    typedef void  (*CtorFunc)(void*, void*);
+    typedef void* (*PlayAudioFunc)(void*, YColumnMediaEntity*, bool);
+    typedef void* (*ShowPlayerFunc)(void*);
+    typedef void  (*WipeDataFunc)(void*);
+
+    // 获取系统符号地址
+    InstanceFunc mediaManagerInstance = (InstanceFunc)dlsym(RTLD_DEFAULT, "_ZN10YSingletonI13YMediaManagerE8instanceEv");
+    CtorFunc entityCtor = (CtorFunc)dlsym(RTLD_DEFAULT, "_ZN18YColumnMediaEntityC2EP7QObject");
+    PlayAudioFunc playAudio = (PlayAudioFunc)dlsym(RTLD_DEFAULT, "_ZN13YMediaManager9playAudioERK18YColumnMediaEntityb");
+    WipeDataFunc wipeData = (WipeDataFunc)dlsym(RTLD_DEFAULT, "_ZN19YMediaPlayerManager8wipeDataEv");
+    InstanceFunc globalInstance = (InstanceFunc)dlsym(RTLD_DEFAULT, "_ZN10YSingletonI7YGlobalE8instanceEv");
+    ShowPlayerFunc showPlayer = (ShowPlayerFunc)dlsym(RTLD_DEFAULT, "_ZN7YGlobal15showAudioPlayerEv");
+    InstanceFunc mediaPlayerManagerInstance = (InstanceFunc)dlsym(RTLD_DEFAULT, "_ZN10YSingletonI19YMediaPlayerManagerE8instanceEv");
+    typedef void (*OnClickedPlayFunc)(void*);
+    OnClickedPlayFunc onClickedPlay = (OnClickedPlayFunc)dlsym(RTLD_DEFAULT, "_ZN19YMediaPlayerManager13onClickedPlayEv");
+
+    qDebug() << "[NeteasePlayer] symbols:"
+             << "mediaManagerInstance=" << (void*)mediaManagerInstance
+             << "entityCtor=" << (void*)entityCtor
+             << "playAudio=" << (void*)playAudio
+             << "wipeData=" << (void*)wipeData
+             << "globalInstance=" << (void*)globalInstance
+             << "showPlayer=" << (void*)showPlayer;
+
+    if (!mediaManagerInstance || !entityCtor || !playAudio) {
+        QString err = "无法获取系统播放器符号，请检查 PenMods 版本";
+        qWarning() << "[NeteasePlayer]" << err;
+        emit errorOccurred(err);
+        return;
+    }
+
+    // 清空播放器数据
+    if (wipeData && mediaPlayerManagerInstance) {
+        void* mpm = mediaPlayerManagerInstance();
+        if (mpm) {
+            wipeData(mpm);
+            qDebug() << "[NeteasePlayer] wiped media player data";
+        }
+    }
+
+    // 创建 YColumnMediaEntity 对象
+    void* memory = new char[sizeof(YColumnMediaEntity)];
+    memset(memory, 0, sizeof(YColumnMediaEntity));
+    entityCtor(memory, nullptr);
+    YColumnMediaEntity* entity = reinterpret_cast<YColumnMediaEntity*>(memory);
+
+    // 设置实体字段
+    static int mediaId = 0;
+    mediaId--;
+    entity->mId            = mediaId;
+    entity->mMediaId       = QString::number(mediaId);
+    entity->mOwnerId       = "netease_music_plugin";
+    entity->mColumnId      = "netease_music_plugin";
+    entity->mIsDir         = false;
+    entity->mDownloadState = 2;  // SUCCEED
+    entity->mTitle         = fi.fileName();
+    entity->mLocalFile     = filePath;
+    entity->mDuration      = 0;
+    entity->mProgress      = 0;
+    entity->mSrcAudioVisible = true;
+
+    qDebug() << "[NeteasePlayer] entity created, title:" << entity->mTitle
+             << "localFile:" << entity->mLocalFile;
+
+    // 获取 YMediaManager 单例并播放
+    void* mediaManager = mediaManagerInstance();
+    if (!mediaManager) {
+        emit errorOccurred("无法获取 YMediaManager 实例");
+        delete[] memory;
+        return;
+    }
+
+    qDebug() << "[NeteasePlayer] calling playAudio...";
+    void* result = playAudio(mediaManager, entity, true);
+    qDebug() << "[NeteasePlayer] playAudio returned:" << result;
+
+    // 显示系统播放器界面
+    if (globalInstance && showPlayer) {
+        void* global = globalInstance();
+        if (global) {
+            showPlayer(global);
+            qDebug() << "[NeteasePlayer] showed system audio player";
+        }
+    }
+
+    // 如果没有自动播放，手动触发播放
+    if (onClickedPlay && mediaPlayerManagerInstance) {
+        void* mpm = mediaPlayerManagerInstance();
+        if (mpm) {
+            // 检查播放状态，如果不是 PLAYING 则触发播放
+            // 这里简化处理，直接调用 onClickedPlay
+            // onClickedPlay(mpm);
+            // qDebug() << "[NeteasePlayer] called onClickedPlay";
+        }
+    }
+
+    // entity 会被系统复制，所以可以删除
+    delete[] memory;
+
+    m_source = filePath;
+    emit sourceChanged(filePath);
+    setPlaying(true);
+    qDebug() << "[NeteasePlayer] system player playback started";
 }

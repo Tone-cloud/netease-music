@@ -9,6 +9,28 @@
 #include <QNetworkReply>
 #include "AudioDecoder.h"
 
+// 有道词典笔系统原生播放器相关结构体（参考 PenMods）
+struct YMediaEntity {
+    char    unk[10];
+    QString mMediaId;
+    QString mOwnerId;
+    QString mTitle;
+    int     mDuration;
+    int     mDownloadState;
+    QString mUrl;
+    QString mLocalFile;
+    QString mLrcFile;
+    int     mLrcState;
+    bool    mSrcAudioVisible;
+};
+
+struct YColumnMediaEntity : public YMediaEntity {
+    int     mId;
+    QString mColumnId;
+    int     mProgress;
+    bool    mIsDir;
+};
+
 /**
  * @brief 网易云音乐播放器 QML 类型
  *
@@ -64,6 +86,8 @@ public slots:
     Q_INVOKABLE void startServer(const QString &path);
     /// 执行 shell 命令（火忘式，用于启动 server 等）
     Q_INVOKABLE void execDetached(const QString &cmd);
+    /// 使用系统原生播放器播放本地文件
+    Q_INVOKABLE void playWithSystemPlayer(const QString &filePath);
 
 signals:
     void positionChanged(qint64 ms);
