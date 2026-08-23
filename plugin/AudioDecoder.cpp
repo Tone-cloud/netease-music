@@ -5,13 +5,12 @@
 
 AudioDecoder::AudioDecoder(QObject *parent)
     : QObject(parent) {
-    // 初始化 FFmpeg（只调用一次）
-    static bool ffmpegInited = false;
-    if (!ffmpegInited) {
-        av_register_all();
+    // 初始化 FFmpeg 网络协议（只调用一次）
+    static bool networkInited = false;
+    if (!networkInited) {
         avformat_network_init();
-        ffmpegInited = true;
-        qDebug() << "[AudioDecoder] FFmpeg initialized (av_register_all + avformat_network_init)";
+        networkInited = true;
+        qDebug() << "[AudioDecoder] avformat_network_init done";
     }
 }
 
@@ -81,33 +80,13 @@ bool AudioDecoder::openInput() {
     qDebug() << "[AudioDecoder] openInput, path:" << m_path;
     qDebug() << "[AudioDecoder] file exists:" << fileInfo.exists() << "size:" << fileInfo.size();
 
-    // 先尝试自动检测格式
     int ret = avformat_open_input(&m_fmtCtx, pathBytes.constData(), nullptr, nullptr);
     if (ret < 0) {
         char errbuf[256];
         av_strerror(ret, errbuf, sizeof(errbuf));
-        qDebug() << "[AudioDecoder] avformat_open_input auto-detect failed, ret:" << ret << "err:" << errbuf;
-
-        // 尝试强制指定 mp3 格式
-        qDebug() << "[AudioDecoder] trying forced mp3 format...";
-        AVInputFormat *mp3Fmt = av_find_input_format("mp3");
-        if (mp3Fmt) {
-            qDebug() << "[AudioDecoder] found mp3 input format:" << mp3Fmt->name;
-            ret = avformat_open_input(&m_fmtCtx, pathBytes.constData(), mp3Fmt, nullptr);
-            if (ret < 0) {
-                av_strerror(ret, errbuf, sizeof(errbuf));
-                qDebug() << "[AudioDecoder] forced mp3 also failed, ret:" << ret << "err:" << errbuf;
-            } else {
-                qDebug() << "[AudioDecoder] forced mp3 format succeeded!";
-            }
-        } else {
-            qDebug() << "[AudioDecoder] mp3 input format NOT found!";
-        }
-
-        if (ret < 0) {
-            emit errorOccurred(QString("无法打开: %1").arg(errbuf));
-            return false;
-        }
+        qDebug() << "[AudioDecoder] avformat_open_input failed, ret:" << ret << "err:" << errbuf;
+        emit errorOccurred(QString("无法打开: %1").arg(errbuf));
+        return false;
     }
     qDebug() << "[AudioDecoder] avformat_open_input success, format:" << m_fmtCtx->iformat->name;
 
