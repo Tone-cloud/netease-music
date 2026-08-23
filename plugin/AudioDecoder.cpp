@@ -1,14 +1,19 @@
 #include "AudioDecoder.h"
 #include <QDebug>
+#include <QFile>
+#include <QFileInfo>
 
 AudioDecoder::AudioDecoder(QObject *parent)
     : QObject(parent) {
-    // 初始化 FFmpeg 网络协议（只调用一次）
-    static bool networkInited = false;
-    if (!networkInited) {
+    // 初始化 FFmpeg（只调用一次）
+    static bool ffmpegInited = false;
+    if (!ffmpegInited) {
+        av_register_all();
         avformat_network_init();
-        networkInited = true;
-        qDebug() << "[AudioDecoder] avformat_network_init done";
+        ffmpegInited = true;
+        qDebug() << "[AudioDecoder] FFmpeg initialized, version:" << av_version_info();
+        qDebug() << "[AudioDecoder] avcodec version:" << avcodec_version();
+        qDebug() << "[AudioDecoder] avformat version:" << avformat_version();
     }
 }
 
@@ -72,13 +77,42 @@ void AudioDecoder::cleanup() {
 
 bool AudioDecoder::openInput() {
     QByteArray pathBytes = m_path.toUtf8();
+
+    // 检查文件是否存在
+    QFileInfo fileInfo(m_path);
+    qDebug() << "[AudioDecoder] openInput, path:" << m_path;
+    qDebug() << "[AudioDecoder] file exists:" << fileInfo.exists() << "size:" << fileInfo.size();
+
+    // 先尝试自动检测格式
     int ret = avformat_open_input(&m_fmtCtx, pathBytes.constData(), nullptr, nullptr);
     if (ret < 0) {
         char errbuf[256];
         av_strerror(ret, errbuf, sizeof(errbuf));
-        emit errorOccurred(QString("无法打开: %1").arg(errbuf));
-        return false;
+        qDebug() << "[AudioDecoder] avformat_open_input auto-detect failed, ret:" << ret << "err:" << errbuf;
+
+        // 尝试强制指定 mp3 格式
+        qDebug() << "[AudioDecoder] trying forced mp3 format...";
+        AVInputFormat *mp3Fmt = av_find_input_format("mp3");
+        if (mp3Fmt) {
+            qDebug() << "[AudioDecoder] found mp3 input format:" << mp3Fmt->name;
+            ret = avformat_open_input(&m_fmtCtx, pathBytes.constData(), mp3Fmt, nullptr);
+            if (ret < 0) {
+                av_strerror(ret, errbuf, sizeof(errbuf));
+                qDebug() << "[AudioDecoder] forced mp3 also failed, ret:" << ret << "err:" << errbuf;
+            } else {
+                qDebug() << "[AudioDecoder] forced mp3 format succeeded!";
+            }
+        } else {
+            qDebug() << "[AudioDecoder] mp3 input format NOT found!";
+        }
+
+        if (ret < 0) {
+            emit errorOccurred(QString("无法打开: %1").arg(errbuf));
+            return false;
+        }
     }
+    qDebug() << "[AudioDecoder] avformat_open_input success, format:" << m_fmtCtx->iformat->name;
+
     ret = avformat_find_stream_info(m_fmtCtx, nullptr);
     if (ret < 0) {
         emit errorOccurred("无法获取流信息");

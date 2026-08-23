@@ -519,7 +519,7 @@ func handleSongUrl(w http.ResponseWriter, r *http.Request) {
 		writeError(w, "缺少 id")
 		return
 	}
-	body := fmt.Sprintf(`{"ids":"[%s]","level":"standard","encodeType":"aac"}`, id)
+	body := fmt.Sprintf(`{"ids":"[%s]","level":"standard","encodeType":"mp3"}`, id)
 	data, err := weapiPost("/weapi/song/enhance/player/url/v1", body)
 	if err != nil {
 		writeError(w, err.Error())
@@ -786,7 +786,7 @@ func handleCache(w http.ResponseWriter, r *http.Request) {
 
 	// 如果是 ID 模式，先获取播放地址
 	if songUrl == "" {
-		body := fmt.Sprintf(`{"ids":"[%s]","level":"standard","encodeType":"aac"}`, id)
+		body := fmt.Sprintf(`{"ids":"[%s]","level":"standard","encodeType":"mp3"}`, id)
 		data, err := weapiPost("/weapi/song/enhance/player/url/v1", body)
 		if err != nil {
 			writeError(w, err.Error())
@@ -835,7 +835,7 @@ func handleDownload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// 获取地址并下载
-	body := fmt.Sprintf(`{"ids":"[%s]","level":"standard","encodeType":"aac"}`, id)
+	body := fmt.Sprintf(`{"ids":"[%s]","level":"standard","encodeType":"mp3"}`, id)
 	data, err := weapiPost("/weapi/song/enhance/player/url/v1", body)
 	if err != nil {
 		writeError(w, err.Error())
@@ -900,6 +900,8 @@ func downloadFile(url, dest string) error {
 		return err
 	}
 	defer resp.Body.Close()
+	fmt.Printf("[download] status=%d content-type=%s content-length=%s\n",
+		resp.StatusCode, resp.Header.Get("Content-Type"), resp.Header.Get("Content-Length"))
 	if resp.StatusCode != 200 {
 		return fmt.Errorf("HTTP %d", resp.StatusCode)
 	}
@@ -908,7 +910,8 @@ func downloadFile(url, dest string) error {
 		return err
 	}
 	defer out.Close()
-	_, err = io.Copy(out, resp.Body)
+	n, err := io.Copy(out, resp.Body)
+	fmt.Printf("[download] saved %d bytes to %s\n", n, dest)
 	return err
 }
 
