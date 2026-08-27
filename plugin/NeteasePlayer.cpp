@@ -9,6 +9,123 @@
 #include <dlfcn.h>
 #include <QFileInfo>
 
+#include <elf.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <cstdio>
+#include <cstring>
+#include <cstdlib>
+
+// ========== ELF .symtab 符号解析器 ==========
+// dlsym 只能查 .dynsym（动态符号表），有道主程序的 C++ 符号在 .symtab（静态符号表）中，
+// 没有被导出，所以需要自己解析 ELF 文件查找符号地址。
+
+/// 从 /proc/self/maps 获取主程序加载基地址
+static quint64 getMainBase() {
+    FILE *f = fopen("/proc/self/maps", "r");
+    if (!f) return 0;
+    char line[1024];
+    quint64 base = 0;
+    while (fgets(line, sizeof(line), f)) {
+        // 找第一个可执行段（r-xp），通常就是主程序的代码段基址
+        if (strstr(line, "r-xp")) {
+            char *p = strtok(line, "-");
+            base = strtoul(p, nullptr, 16);
+            if (base == 0x8000) base = 0;  // 某些加载器偏移
+            break;
+        }
+    }
+    fclose(f);
+    return base;
+}
+
+/// 解析主程序 ELF 的 .symtab 段，按符号名查找地址
+static void *resolveSymbol(const char *name) {
+    static quint64 base = 0;
+    static bool baseInited = false;
+    if (!baseInited) {
+        base = getMainBase();
+        baseInited = true;
+        qDebug() << "[resolveSymbol] main base:" << (void*)base;
+    }
+    if (!base || !name) return nullptr;
+
+    // 获取主程序路径
+    char exePath[512];
+    ssize_t len = readlink("/proc/self/exe", exePath, sizeof(exePath) - 1);
+    if (len <= 0) return nullptr;
+    exePath[len] = '\0';
+
+    int fd = open(exePath, O_RDONLY);
+    if (fd < 0) return nullptr;
+
+    // 读取 ELF header
+    Elf64_Ehdr ehdr;
+    if (read(fd, &ehdr, sizeof(ehdr)) != (ssize_t)sizeof(ehdr)) {
+        close(fd);
+        return nullptr;
+    }
+    // 校验 ELF magic
+    if (memcmp(ehdr.e_ident, ELFMAG, SELFMAG) != 0) {
+        close(fd);
+        return nullptr;
+    }
+
+    // 读取 section header table
+    Elf64_Shdr *shdrs = new Elf64_Shdr[ehdr.e_shnum];
+    lseek(fd, ehdr.e_shoff, SEEK_SET);
+    if (read(fd, shdrs, sizeof(Elf64_Shdr) * ehdr.e_shnum) != (ssize_t)(sizeof(Elf64_Shdr) * ehdr.e_shnum)) {
+        delete[] shdrs;
+        close(fd);
+        return nullptr;
+    }
+
+    // 找到 .symtab 段和对应的 .strtab 字符串表
+    Elf64_Shdr *symtabSec = nullptr;
+    Elf64_Shdr *strtabSec = nullptr;
+    for (int i = 0; i < ehdr.e_shnum; i++) {
+        if (shdrs[i].sh_type == SHT_SYMTAB) {
+            symtabSec = &shdrs[i];
+            strtabSec = &shdrs[symtabSec->sh_link];
+            break;
+        }
+    }
+    if (!symtabSec || !strtabSec) {
+        delete[] shdrs;
+        close(fd);
+        qWarning() << "[resolveSymbol] .symtab not found in" << exePath;
+        return nullptr;
+    }
+
+    // 读取字符串表
+    char *strs = new char[strtabSec->sh_size];
+    lseek(fd, strtabSec->sh_offset, SEEK_SET);
+    read(fd, strs, strtabSec->sh_size);
+
+    // 读取符号表
+    int symCount = symtabSec->sh_size / sizeof(Elf64_Sym);
+    Elf64_Sym *syms = new Elf64_Sym[symCount];
+    lseek(fd, symtabSec->sh_offset, SEEK_SET);
+    read(fd, syms, symtabSec->sh_size);
+
+    // 查找符号
+    void *result = nullptr;
+    for (int i = 0; i < symCount; i++) {
+        if (syms[i].st_name >= strtabSec->sh_size) continue;
+        const char *symName = strs + syms[i].st_name;
+        if (strcmp(symName, name) == 0 && syms[i].st_value != 0) {
+            result = reinterpret_cast<void*>(base + syms[i].st_value);
+            break;
+        }
+    }
+
+    delete[] syms;
+    delete[] strs;
+    delete[] shdrs;
+    close(fd);
+    return result;
+}
+
 NeteasePlayer::NeteasePlayer(QObject *parent)
     : QObject(parent) {
     m_decoder = new AudioDecoder(this);
@@ -337,16 +454,18 @@ void NeteasePlayer::playWithSystemPlayer(const QString &filePath) {
     typedef void* (*ShowPlayerFunc)(void*);
     typedef void  (*WipeDataFunc)(void*);
 
-    // 获取系统符号地址
-    InstanceFunc mediaManagerInstance = (InstanceFunc)dlsym(RTLD_DEFAULT, "_ZN10YSingletonI13YMediaManagerE8instanceEv");
-    CtorFunc entityCtor = (CtorFunc)dlsym(RTLD_DEFAULT, "_ZN18YColumnMediaEntityC2EP7QObject");
-    PlayAudioFunc playAudio = (PlayAudioFunc)dlsym(RTLD_DEFAULT, "_ZN13YMediaManager9playAudioERK18YColumnMediaEntityb");
-    WipeDataFunc wipeData = (WipeDataFunc)dlsym(RTLD_DEFAULT, "_ZN19YMediaPlayerManager8wipeDataEv");
-    InstanceFunc globalInstance = (InstanceFunc)dlsym(RTLD_DEFAULT, "_ZN10YSingletonI7YGlobalE8instanceEv");
-    ShowPlayerFunc showPlayer = (ShowPlayerFunc)dlsym(RTLD_DEFAULT, "_ZN7YGlobal15showAudioPlayerEv");
-    InstanceFunc mediaPlayerManagerInstance = (InstanceFunc)dlsym(RTLD_DEFAULT, "_ZN10YSingletonI19YMediaPlayerManagerE8instanceEv");
+    // 获取系统符号地址（通过 ELF .symtab 解析，dlsym 找不到这些未导出的符号）
+    InstanceFunc mediaManagerInstance = (InstanceFunc)resolveSymbol("_ZN10YSingletonI13YMediaManagerE8instanceEv");
+    CtorFunc entityCtor = (CtorFunc)resolveSymbol("_ZN18YColumnMediaEntityC2EP7QObject");
+    PlayAudioFunc playAudio = (PlayAudioFunc)resolveSymbol("_ZN13YMediaManager9playAudioERK18YColumnMediaEntityb");
+    WipeDataFunc wipeData = (WipeDataFunc)resolveSymbol("_ZN19YMediaPlayerManager8wipeDataEv");
+    InstanceFunc globalInstance = (InstanceFunc)resolveSymbol("_ZN10YSingletonI7YGlobalE8instanceEv");
+    ShowPlayerFunc showPlayer = (ShowPlayerFunc)resolveSymbol("_ZN7YGlobal15showAudioPlayerEv");
+    // YMediaPlayerManager 单例存在静态变量 t 中，需要解引用（PenMods 也是这么做的）
+    void* mpmTSym = resolveSymbol("_ZN10YSingletonI19YMediaPlayerManagerE1tE");
+    void* mediaPlayerManager = mpmTSym ? *(void**)mpmTSym : nullptr;
     typedef void (*OnClickedPlayFunc)(void*);
-    OnClickedPlayFunc onClickedPlay = (OnClickedPlayFunc)dlsym(RTLD_DEFAULT, "_ZN19YMediaPlayerManager13onClickedPlayEv");
+    OnClickedPlayFunc onClickedPlay = (OnClickedPlayFunc)resolveSymbol("_ZN19YMediaPlayerManager13onClickedPlayEv");
 
     qDebug() << "[NeteasePlayer] symbols:"
              << "mediaManagerInstance=" << (void*)mediaManagerInstance
@@ -354,7 +473,9 @@ void NeteasePlayer::playWithSystemPlayer(const QString &filePath) {
              << "playAudio=" << (void*)playAudio
              << "wipeData=" << (void*)wipeData
              << "globalInstance=" << (void*)globalInstance
-             << "showPlayer=" << (void*)showPlayer;
+             << "showPlayer=" << (void*)showPlayer
+             << "mpmTSym=" << mpmTSym
+             << "mediaPlayerManager=" << mediaPlayerManager;
 
     if (!mediaManagerInstance || !entityCtor || !playAudio) {
         QString err = "无法获取系统播放器符号，请检查 PenMods 版本";
@@ -364,12 +485,9 @@ void NeteasePlayer::playWithSystemPlayer(const QString &filePath) {
     }
 
     // 清空播放器数据
-    if (wipeData && mediaPlayerManagerInstance) {
-        void* mpm = mediaPlayerManagerInstance();
-        if (mpm) {
-            wipeData(mpm);
-            qDebug() << "[NeteasePlayer] wiped media player data";
-        }
+    if (wipeData && mediaPlayerManager) {
+        wipeData(mediaPlayerManager);
+        qDebug() << "[NeteasePlayer] wiped media player data";
     }
 
     // 创建 YColumnMediaEntity 对象
@@ -418,14 +536,9 @@ void NeteasePlayer::playWithSystemPlayer(const QString &filePath) {
     }
 
     // 如果没有自动播放，手动触发播放
-    if (onClickedPlay && mediaPlayerManagerInstance) {
-        void* mpm = mediaPlayerManagerInstance();
-        if (mpm) {
-            // 检查播放状态，如果不是 PLAYING 则触发播放
-            // 这里简化处理，直接调用 onClickedPlay
-            // onClickedPlay(mpm);
-            // qDebug() << "[NeteasePlayer] called onClickedPlay";
-        }
+    if (onClickedPlay && mediaPlayerManager) {
+        onClickedPlay(mediaPlayerManager);
+        qDebug() << "[NeteasePlayer] called onClickedPlay";
     }
 
     // entity 会被系统复制，所以可以删除
