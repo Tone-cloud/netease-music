@@ -169,9 +169,9 @@ static void *resolveSymbol(const char *name) {
         const char *symName = strs + syms[i].st_name;
         if (!symName) continue;
         if (strcmp(symName, name) == 0 && syms[i].st_value != 0) {
-            result = reinterpret_cast<void*>(base + syms[i].st_value);
+            result = reinterpret_cast<void*>(syms[i].st_value);  // PenMods 不加 base，直接用 st_value
             qDebug() << "[resolveSymbol] found" << name << "->" << result
-                     << "(st_value=" << (void*)syms[i].st_value << ")";
+                     << "(st_value=" << (void*)syms[i].st_value << "base=" << (void*)base << ")";
             break;
         }
     }
