@@ -513,42 +513,26 @@ void NeteasePlayer::playWithSystemPlayer(const QString &filePath) {
     typedef void  (*CtorFunc)(void*, void*);
     typedef void* (*PlayAudioFunc)(void*, YColumnMediaEntity*, bool);
     typedef void* (*ShowPlayerFunc)(void*);
-    typedef void  (*WipeDataFunc)(void*);
 
     // 获取系统符号地址（通过 ELF .symtab 解析，dlsym 找不到这些未导出的符号）
     InstanceFunc mediaManagerInstance = (InstanceFunc)resolveSymbol("_ZN10YSingletonI13YMediaManagerE8instanceEv");
     CtorFunc entityCtor = (CtorFunc)resolveSymbol("_ZN18YColumnMediaEntityC2EP7QObject");
     PlayAudioFunc playAudio = (PlayAudioFunc)resolveSymbol("_ZN13YMediaManager9playAudioERK18YColumnMediaEntityb");
-    WipeDataFunc wipeData = (WipeDataFunc)resolveSymbol("_ZN19YMediaPlayerManager8wipeDataEv");
     InstanceFunc globalInstance = (InstanceFunc)resolveSymbol("_ZN10YSingletonI7YGlobalE8instanceEv");
     ShowPlayerFunc showPlayer = (ShowPlayerFunc)resolveSymbol("_ZN7YGlobal15showAudioPlayerEv");
-    // YMediaPlayerManager 单例存在静态变量 t 中，需要解引用（PenMods 也是这么做的）
-    void* mpmTSym = resolveSymbol("_ZN10YSingletonI19YMediaPlayerManagerE1tE");
-    void* mediaPlayerManager = mpmTSym ? *(void**)mpmTSym : nullptr;
-    typedef void (*OnClickedPlayFunc)(void*);
-    OnClickedPlayFunc onClickedPlay = (OnClickedPlayFunc)resolveSymbol("_ZN19YMediaPlayerManager13onClickedPlayEv");
 
     qDebug() << "[NeteasePlayer] symbols:"
              << "mediaManagerInstance=" << (void*)mediaManagerInstance
              << "entityCtor=" << (void*)entityCtor
              << "playAudio=" << (void*)playAudio
-             << "wipeData=" << (void*)wipeData
              << "globalInstance=" << (void*)globalInstance
-             << "showPlayer=" << (void*)showPlayer
-             << "mpmTSym=" << mpmTSym
-             << "mediaPlayerManager=" << mediaPlayerManager;
+             << "showPlayer=" << (void*)showPlayer;
 
     if (!mediaManagerInstance || !entityCtor || !playAudio) {
         QString err = "无法获取系统播放器符号，请检查 PenMods 版本";
         qWarning() << "[NeteasePlayer]" << err;
         emit errorOccurred(err);
         return;
-    }
-
-    // 清空播放器数据
-    if (wipeData && mediaPlayerManager) {
-        wipeData(mediaPlayerManager);
-        qDebug() << "[NeteasePlayer] wiped media player data";
     }
 
     // 创建 YColumnMediaEntity 对象
@@ -594,12 +578,6 @@ void NeteasePlayer::playWithSystemPlayer(const QString &filePath) {
             showPlayer(global);
             qDebug() << "[NeteasePlayer] showed system audio player";
         }
-    }
-
-    // 如果没有自动播放，手动触发播放
-    if (onClickedPlay && mediaPlayerManager) {
-        onClickedPlay(mediaPlayerManager);
-        qDebug() << "[NeteasePlayer] called onClickedPlay";
     }
 
     // entity 会被系统复制，所以可以删除
