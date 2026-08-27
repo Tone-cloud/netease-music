@@ -535,10 +535,15 @@ void NeteasePlayer::playWithSystemPlayer(const QString &filePath) {
         return;
     }
 
+    qDebug() << "[NeteasePlayer] step1: creating entity, sizeof(YColumnMediaEntity)=" << sizeof(YColumnMediaEntity);
+
     // 创建 YColumnMediaEntity 对象
     void* memory = new char[sizeof(YColumnMediaEntity)];
+    qDebug() << "[NeteasePlayer] step2: memory allocated at" << memory;
     memset(memory, 0, sizeof(YColumnMediaEntity));
+    qDebug() << "[NeteasePlayer] step3: memset done, calling entityCtor...";
     entityCtor(memory, nullptr);
+    qDebug() << "[NeteasePlayer] step4: entityCtor done";
     YColumnMediaEntity* entity = reinterpret_cast<YColumnMediaEntity*>(memory);
 
     // 设置实体字段
@@ -556,35 +561,42 @@ void NeteasePlayer::playWithSystemPlayer(const QString &filePath) {
     entity->mProgress      = 0;
     entity->mSrcAudioVisible = true;
 
-    qDebug() << "[NeteasePlayer] entity created, title:" << entity->mTitle
+    qDebug() << "[NeteasePlayer] step5: entity fields set, title:" << entity->mTitle
              << "localFile:" << entity->mLocalFile;
 
     // 获取 YMediaManager 单例并播放
+    qDebug() << "[NeteasePlayer] step6: calling mediaManagerInstance()...";
     void* mediaManager = mediaManagerInstance();
+    qDebug() << "[NeteasePlayer] step7: mediaManager =" << mediaManager;
     if (!mediaManager) {
         emit errorOccurred("无法获取 YMediaManager 实例");
         delete[] memory;
         return;
     }
 
-    qDebug() << "[NeteasePlayer] calling playAudio...";
+    qDebug() << "[NeteasePlayer] step8: calling playAudio(mediaManager, entity, true)...";
     void* result = playAudio(mediaManager, entity, true);
-    qDebug() << "[NeteasePlayer] playAudio returned:" << result;
+    qDebug() << "[NeteasePlayer] step9: playAudio returned:" << result;
 
     // 显示系统播放器界面
     if (globalInstance && showPlayer) {
+        qDebug() << "[NeteasePlayer] step10: calling globalInstance()...";
         void* global = globalInstance();
+        qDebug() << "[NeteasePlayer] step11: global =" << global;
         if (global) {
+            qDebug() << "[NeteasePlayer] step12: calling showPlayer(global)...";
             showPlayer(global);
-            qDebug() << "[NeteasePlayer] showed system audio player";
+            qDebug() << "[NeteasePlayer] step13: showPlayer done";
         }
     }
 
     // entity 会被系统复制，所以可以删除
+    qDebug() << "[NeteasePlayer] step14: deleting entity memory...";
     delete[] memory;
+    qDebug() << "[NeteasePlayer] step15: entity memory deleted";
 
     m_source = filePath;
     emit sourceChanged(filePath);
     setPlaying(true);
-    qDebug() << "[NeteasePlayer] system player playback started";
+    qDebug() << "[NeteasePlayer] step16: system player playback started";
 }
