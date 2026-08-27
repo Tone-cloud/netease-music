@@ -20,22 +20,36 @@
 // dlsym 只能查 .dynsym（动态符号表），有道主程序的 C++ 符号在 .symtab（静态符号表）中，
 // 没有被导出，所以需要自己解析 ELF 文件查找符号地址。
 
-/// 从 /proc/self/maps 获取主程序加载基地址
+/// 获取主程序路径
+static QString getExePath() {
+    char exePath[512];
+    ssize_t len = readlink("/proc/self/exe", exePath, sizeof(exePath) - 1);
+    if (len <= 0) return QString();
+    exePath[len] = '\0';
+    return QString::fromLocal8Bit(exePath);
+}
+
+/// 从 /proc/self/maps 获取主程序加载基地址（按主程序路径查找，和 PenMods 一致）
 static quint64 getMainBase() {
+    QString exePath = getExePath();
+    if (exePath.isEmpty()) return 0;
+    QByteArray exeBa = exePath.toLocal8Bit();
+    const char *exeName = exeBa.constData();
+
     FILE *f = fopen("/proc/self/maps", "r");
     if (!f) return 0;
     char line[1024];
     quint64 base = 0;
     while (fgets(line, sizeof(line), f)) {
-        // 找第一个可执行段（r-xp），通常就是主程序的代码段基址
-        if (strstr(line, "r-xp")) {
+        if (strstr(line, exeName)) {
             char *p = strtok(line, "-");
             base = strtoul(p, nullptr, 16);
-            if (base == 0x8000) base = 0;  // 某些加载器偏移
+            if (base == 0x8000) base = 0;
             break;
         }
     }
     fclose(f);
+    qDebug() << "[resolveSymbol] exe:" << exePath << "base:" << (void*)base;
     return base;
 }
 
@@ -46,36 +60,55 @@ static void *resolveSymbol(const char *name) {
     if (!baseInited) {
         base = getMainBase();
         baseInited = true;
-        qDebug() << "[resolveSymbol] main base:" << (void*)base;
     }
     if (!base || !name) return nullptr;
 
-    // 获取主程序路径
-    char exePath[512];
-    ssize_t len = readlink("/proc/self/exe", exePath, sizeof(exePath) - 1);
-    if (len <= 0) return nullptr;
-    exePath[len] = '\0';
+    QString exePath = getExePath();
+    if (exePath.isEmpty()) return nullptr;
+    QByteArray exeBa = exePath.toLocal8Bit();
 
-    int fd = open(exePath, O_RDONLY);
-    if (fd < 0) return nullptr;
+    int fd = open(exeBa.constData(), O_RDONLY);
+    if (fd < 0) {
+        qWarning() << "[resolveSymbol] open failed:" << exePath;
+        return nullptr;
+    }
 
     // 读取 ELF header
     Elf64_Ehdr ehdr;
-    if (read(fd, &ehdr, sizeof(ehdr)) != (ssize_t)sizeof(ehdr)) {
+    memset(&ehdr, 0, sizeof(ehdr));
+    ssize_t r = read(fd, &ehdr, sizeof(ehdr));
+    if (r != (ssize_t)sizeof(ehdr)) {
+        qWarning() << "[resolveSymbol] read ehdr failed, got" << r;
         close(fd);
         return nullptr;
     }
-    // 校验 ELF magic
     if (memcmp(ehdr.e_ident, ELFMAG, SELFMAG) != 0) {
+        qWarning() << "[resolveSymbol] not an ELF file";
+        close(fd);
+        return nullptr;
+    }
+    qDebug() << "[resolveSymbol] ELF shnum=" << ehdr.e_shnum << "shoff=" << (void*)ehdr.e_shoff;
+
+    if (ehdr.e_shnum == 0 || ehdr.e_shoff == 0) {
+        qWarning() << "[resolveSymbol] no section headers";
         close(fd);
         return nullptr;
     }
 
     // 读取 section header table
-    Elf64_Shdr *shdrs = new Elf64_Shdr[ehdr.e_shnum];
+    size_t shdrSize = sizeof(Elf64_Shdr) * ehdr.e_shnum;
+    Elf64_Shdr *shdrs = (Elf64_Shdr*)malloc(shdrSize);
+    if (!shdrs) {
+        qWarning() << "[resolveSymbol] malloc shdrs failed, size" << shdrSize;
+        close(fd);
+        return nullptr;
+    }
+    memset(shdrs, 0, shdrSize);
     lseek(fd, ehdr.e_shoff, SEEK_SET);
-    if (read(fd, shdrs, sizeof(Elf64_Shdr) * ehdr.e_shnum) != (ssize_t)(sizeof(Elf64_Shdr) * ehdr.e_shnum)) {
-        delete[] shdrs;
+    r = read(fd, shdrs, shdrSize);
+    if (r != (ssize_t)shdrSize) {
+        qWarning() << "[resolveSymbol] read shdrs failed, got" << r << "expected" << shdrSize;
+        free(shdrs);
         close(fd);
         return nullptr;
     }
@@ -83,45 +116,73 @@ static void *resolveSymbol(const char *name) {
     // 找到 .symtab 段和对应的 .strtab 字符串表
     Elf64_Shdr *symtabSec = nullptr;
     Elf64_Shdr *strtabSec = nullptr;
-    for (int i = 0; i < ehdr.e_shnum; i++) {
+    for (int i = 0; i < (int)ehdr.e_shnum; i++) {
         if (shdrs[i].sh_type == SHT_SYMTAB) {
             symtabSec = &shdrs[i];
-            strtabSec = &shdrs[symtabSec->sh_link];
+            if (symtabSec->sh_link < ehdr.e_shnum) {
+                strtabSec = &shdrs[symtabSec->sh_link];
+            }
             break;
         }
     }
     if (!symtabSec || !strtabSec) {
-        delete[] shdrs;
+        qWarning() << "[resolveSymbol] .symtab not found";
+        free(shdrs);
         close(fd);
-        qWarning() << "[resolveSymbol] .symtab not found in" << exePath;
         return nullptr;
     }
+    qDebug() << "[resolveSymbol] symtab size=" << symtabSec->sh_size
+             << "strtab size=" << strtabSec->sh_size;
 
     // 读取字符串表
-    char *strs = new char[strtabSec->sh_size];
+    char *strs = (char*)malloc(strtabSec->sh_size > 0 ? strtabSec->sh_size : 1);
+    if (!strs) {
+        qWarning() << "[resolveSymbol] malloc strs failed";
+        free(shdrs);
+        close(fd);
+        return nullptr;
+    }
+    memset(strs, 0, strtabSec->sh_size > 0 ? strtabSec->sh_size : 1);
     lseek(fd, strtabSec->sh_offset, SEEK_SET);
     read(fd, strs, strtabSec->sh_size);
 
     // 读取符号表
-    int symCount = symtabSec->sh_size / sizeof(Elf64_Sym);
-    Elf64_Sym *syms = new Elf64_Sym[symCount];
+    int symCount = strtabSec->sh_size > 0 ? (int)(symtabSec->sh_size / sizeof(Elf64_Sym)) : 0;
+    Elf64_Sym *syms = (Elf64_Sym*)malloc(symCount > 0 ? sizeof(Elf64_Sym) * symCount : 1);
+    if (!syms) {
+        qWarning() << "[resolveSymbol] malloc syms failed, count" << symCount;
+        free(strs);
+        free(shdrs);
+        close(fd);
+        return nullptr;
+    }
+    memset(syms, 0, symCount > 0 ? sizeof(Elf64_Sym) * symCount : 1);
     lseek(fd, symtabSec->sh_offset, SEEK_SET);
     read(fd, syms, symtabSec->sh_size);
+
+    qDebug() << "[resolveSymbol] searching for" << name << "among" << symCount << "symbols";
 
     // 查找符号
     void *result = nullptr;
     for (int i = 0; i < symCount; i++) {
         if (syms[i].st_name >= strtabSec->sh_size) continue;
         const char *symName = strs + syms[i].st_name;
+        if (!symName) continue;
         if (strcmp(symName, name) == 0 && syms[i].st_value != 0) {
             result = reinterpret_cast<void*>(base + syms[i].st_value);
+            qDebug() << "[resolveSymbol] found" << name << "->" << result
+                     << "(st_value=" << (void*)syms[i].st_value << ")";
             break;
         }
     }
 
-    delete[] syms;
-    delete[] strs;
-    delete[] shdrs;
+    if (!result) {
+        qWarning() << "[resolveSymbol] symbol not found:" << name;
+    }
+
+    free(syms);
+    free(strs);
+    free(shdrs);
     close(fd);
     return result;
 }
