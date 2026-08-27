@@ -155,4 +155,26 @@ QtObject {
     function downloadList(onSuccess, onError) {
         get("/downloads", onSuccess, onError)
     }
+
+    // ── 批量下载 ──
+    function batchStart(songs, onSuccess, onError) {
+        post("/download/batch/start", { songs: songs }, onSuccess, onError)
+    }
+
+    function batchStatus(onSuccess, onError) {
+        get("/download/batch/status", onSuccess, onError)
+    }
+
+    function batchCancel(onSuccess, onError) {
+        post("/download/batch/cancel", {}, onSuccess, onError)
+    }
+
+    // ── 本地音乐管理 ──
+    function localList(onSuccess, onError) {
+        get("/local/list", onSuccess, onError)
+    }
+
+    function localDelete(path, onSuccess, onError) {
+        post("/local/delete", { path: path }, onSuccess, onError)
+    }
 }

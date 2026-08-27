@@ -38,7 +38,133 @@ const (
 	baseAPI    = "https://music.163.com"
 	musicDir   = "/userdisk/Music/netease"
 	cacheDir   = "/userdisk/Music/netease/cache"
+	localMusicRoot = "/userdisk/Music"
 )
+
+// ── 批量下载管理器 ──
+type BatchTask struct {
+	ID     string `json:"id"`
+	Name   string `json:"name"`
+	Artist string `json:"artist"`
+}
+
+type BatchStatus struct {
+	Running     bool   `json:"running"`
+	Total       int    `json:"total"`
+	Done        int    `json:"done"`
+	Failed      int    `json:"failed"`
+	Skipped     int    `json:"skipped"`
+	CurrentIdx  int    `json:"currentIdx"`
+	CurrentName string `json:"currentName"`
+	CurrentSize int64  `json:"currentSize"`
+	CurrentTotal int64 `json:"currentTotal"`
+	Finished    bool   `json:"finished"`
+	Cancelled   bool   `json:"cancelled"`
+}
+
+var (
+	batchMu      sync.Mutex
+	batchTasks   []BatchTask
+	batchIdx     int
+	batchStatus  BatchStatus
+	batchCancel  bool
+	batchRunning bool
+)
+
+func startBatchDownload(tasks []BatchTask) {
+	batchMu.Lock()
+	if batchRunning {
+		batchMu.Unlock()
+		return
+	}
+	batchTasks = tasks
+	batchIdx = 0
+	batchCancel = false
+	batchStatus = BatchStatus{
+		Running: true,
+		Total:   len(tasks),
+	}
+	batchRunning = true
+	batchMu.Unlock()
+
+	go func() {
+		for {
+			batchMu.Lock()
+			if batchCancel || batchIdx >= len(batchTasks) {
+				batchRunning = false
+				batchStatus.Running = false
+				batchStatus.Finished = !batchCancel
+				batchStatus.Cancelled = batchCancel
+				batchMu.Unlock()
+				return
+			}
+			task := batchTasks[batchIdx]
+			batchStatus.CurrentIdx = batchIdx
+			batchStatus.CurrentName = task.Name
+			batchStatus.CurrentSize = 0
+			batchStatus.CurrentTotal = 0
+			batchMu.Unlock()
+
+			// 执行下载
+			err := downloadSong(task.ID, task.Name, task.Artist)
+			batchMu.Lock()
+			if err != nil {
+				if strings.Contains(err.Error(), "已存在") {
+					batchStatus.Skipped++
+				} else {
+					batchStatus.Failed++
+					fmt.Printf("[batch] 下载失败 %s: %v\n", task.Name, err)
+				}
+			} else {
+				batchStatus.Done++
+			}
+			batchIdx++
+			batchMu.Unlock()
+		}
+	}()
+}
+
+func downloadSong(id, name, artist string) error {
+	safeName := sanitizeFilename(name)
+	if safeName == "" {
+		safeName = id
+	}
+	dlFile := filepath.Join(musicDir, safeName+".mp3")
+	// 检查是否已下载
+	if _, err := os.Stat(dlFile); err == nil {
+		return fmt.Errorf("已存在")
+	}
+	// 获取地址
+	body := fmt.Sprintf(`{"ids":"[%s]","level":"standard","encodeType":"mp3"}`, id)
+	data, err := weapiPost("/weapi/song/enhance/player/url/v1", body)
+	if err != nil {
+		return err
+	}
+	var result map[string]interface{}
+	json.Unmarshal(data, &result)
+	songs, _ := result["data"].([]interface{})
+	if len(songs) == 0 {
+		return fmt.Errorf("无法获取播放地址")
+	}
+	song := songs[0].(map[string]interface{})
+	songUrl, _ := song["url"].(string)
+	if songUrl == "" {
+		return fmt.Errorf("歌曲无可用播放地址")
+	}
+	return downloadFile(songUrl, dlFile)
+}
+
+func getBatchStatus() BatchStatus {
+	batchMu.Lock()
+	defer batchMu.Unlock()
+	return batchStatus
+}
+
+func cancelBatchDownload() {
+	batchMu.Lock()
+	batchCancel = true
+	batchMu.Unlock()
+}
 
 // utlsDial 使用 utls 模拟 Chrome 的 TLS 指纹（ClientHello），绕过网易云风控
 // 手动修改 ALPN 扩展，只保留 http/1.1，避免 HTTP/2 帧解析错误
@@ -148,6 +274,11 @@ func main() {
 	http.HandleFunc("/download", handleDownload)
 	http.HandleFunc("/cache", handleCache)
 	http.HandleFunc("/downloads", handleDownloads)
+	http.HandleFunc("/download/batch/start", handleBatchStart)
+	http.HandleFunc("/download/batch/status", handleBatchStatus)
+	http.HandleFunc("/download/batch/cancel", handleBatchCancel)
+	http.HandleFunc("/local/list", handleLocalList)
+	http.HandleFunc("/local/delete", handleLocalDelete)
 	http.HandleFunc("/audio", handleAudioProxy)
 
 	// 异步初始化 cookie（避免阻塞 server 启动导致插件连接超时）
@@ -883,6 +1014,96 @@ func handleDownloads(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, map[string]interface{}{"code": 200, "files": list})
+}
+
+// ── 批量下载 API ──
+func handleBatchStart(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		writeError(w, "需要 POST")
+		return
+	}
+	var req struct {
+		Songs []BatchTask `json:"songs"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, "JSON 解析失败: "+err.Error())
+		return
+	}
+	if len(req.Songs) == 0 {
+		writeError(w, "歌曲列表为空")
+		return
+	}
+	startBatchDownload(req.Songs)
+	writeJSON(w, map[string]interface{}{"code": 200, "msg": "已开始批量下载", "total": len(req.Songs)})
+}
+
+func handleBatchStatus(w http.ResponseWriter, r *http.Request) {
+	status := getBatchStatus()
+	writeJSON(w, map[string]interface{}{"code": 200, "status": status})
+}
+
+func handleBatchCancel(w http.ResponseWriter, r *http.Request) {
+	cancelBatchDownload()
+	writeJSON(w, map[string]interface{}{"code": 200, "msg": "已取消"})
+}
+
+// ── 本地音乐管理 API ──
+func handleLocalList(w http.ResponseWriter, r *http.Request) {
+	var list []map[string]interface{}
+	// 扫描 /userdisk/Music/ 下所有音乐文件（包括子目录）
+	filepath.Walk(localMusicRoot, func(path string, info os.FileInfo, err error) error {
+		if err != nil || info.IsDir() {
+			return nil
+		}
+		ext := strings.ToLower(filepath.Ext(path))
+		if ext == ".mp3" || ext == ".flac" || ext == ".m4a" || ext == ".aac" || ext == ".wav" || ext == ".ogg" {
+			// 跳过缓存目录
+			if strings.Contains(path, "/cache/") {
+				return nil
+			}
+			list = append(list, map[string]interface{}{
+				"name":    strings.TrimSuffix(info.Name(), ext),
+				"path":    path,
+				"size":    info.Size(),
+				"sizeStr": fmt.Sprintf("%.1fMB", float64(info.Size())/1024/1024),
+				"modTime": info.ModTime().Unix(),
+				"ext":     ext,
+			})
+		}
+		return nil
+	})
+	if list == nil {
+		list = []map[string]interface{}{}
+	}
+	writeJSON(w, map[string]interface{}{"code": 200, "files": list, "count": len(list)})
+}
+
+func handleLocalDelete(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		writeError(w, "需要 POST")
+		return
+	}
+	var req struct {
+		Path string `json:"path"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, "JSON 解析失败")
+		return
+	}
+	if req.Path == "" {
+		writeError(w, "缺少 path")
+		return
+	}
+	// 安全检查：只允许删除 /userdisk/Music/ 下的文件
+	if !strings.HasPrefix(req.Path, localMusicRoot) {
+		writeError(w, "路径不合法")
+		return
+	}
+	if err := os.Remove(req.Path); err != nil {
+		writeError(w, "删除失败: "+err.Error())
+		return
+	}
+	writeJSON(w, map[string]interface{}{"code": 200, "msg": "已删除"})
 }
 
 // 下载文件（用带 utls 的 client，模拟浏览器 TLS 指纹）

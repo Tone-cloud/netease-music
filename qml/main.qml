@@ -127,12 +127,13 @@ Rectangle {
                 Pages.HomePage {
                     isLoggedIn: root.isLoggedIn
                     userName: root.userInfo ? root.userInfo.nickname : ""
-                    onBackClicked: root.backButtonClicked()
+                    onBackButtonClicked: root.backButtonClicked()
                     onOpenPlaylist: function(id) { root.navigateTo("playlist", { id: id }) }
                     onOpenSearch: root.navigateTo("search")
                     onOpenLogin: root.navigateTo("user")
                     onOpenUser: root.navigateTo("user")
-                    onOpenToplist: function(idx) { root.navigateTo("playlist", { id: "top_" + idx, idx: idx }) }
+                    onOpenToplist: function(idx) { root.navigateTo("toplist") }
+                    onOpenLocal: root.navigateTo("local")
                     onPlaySong: function(song) { root.playSong(song) }
                 }
             }
@@ -174,6 +175,20 @@ Rectangle {
                             }, null)
                         } else if (id) item.load(id)
                     }
+                }
+            }
+        }
+
+        // ── 排行榜页 ──
+        Loader {
+            active: currentPage === "toplist" || root.stackContains("toplist")
+            visible: currentPage === "toplist"
+            anchors.fill: parent
+            sourceComponent: Component {
+                Pages.ToplistPage {
+                    onBackClicked: root.goBack()
+                    onOpenPlaylist: function(id) { root.navigateTo("playlist", { id: id }) }
+                    onLoaded: function(item) { /* 排行榜数据已内置 */ }
                 }
             }
         }
@@ -231,6 +246,23 @@ Rectangle {
                         player.play(path)
                         root.showToast("正在播放: " + name)
                     }
+                }
+            }
+        }
+
+        // ── 本地音乐页 ──
+        Loader {
+            active: currentPage === "local" || root.stackContains("local")
+            visible: currentPage === "local"
+            anchors.fill: parent
+            sourceComponent: Component {
+                Pages.LocalMusicPage {
+                    onBackClicked: root.goBack()
+                    onPlayLocal: function(file) {
+                        root.globalPlayer.play(file.path)
+                        root.showToast("正在播放: " + file.name)
+                    }
+                    onLoaded: function(item) { /* 页面自动刷新 */ }
                 }
             }
         }
@@ -333,14 +365,24 @@ Rectangle {
     }
     Timer { id: toastTimer; interval: 2000; onTriggered: toast.visible = false }
 
-    // ── 服务器状态 ──
-    Text {
-        anchors.top: parent.top; anchors.right: parent.right
-        anchors.margins: 2
-        text: serverStatus
-        color: serverStatus === "已连接" ? Theme.success : Theme.warning
-        font.pixelSize: Theme.fontTiny
-        visible: currentPage === "home"
+    // ── 全局错误遮罩（bili风格）──
+    property string globalError: ""
+    function showError(msg, retryCallback) {
+        root.globalError = msg
+        root._errorRetryCallback = retryCallback || null
+    }
+    function clearError() { root.globalError = ""; root._errorRetryCallback = null }
+    property var _errorRetryCallback: null
+
+    ErrorOverlay {
+        anchors.fill: parent
+        errorMessage: root.globalError
+        onRetryClicked: {
+            var cb = root._errorRetryCallback
+            root.clearError()
+            if (cb) cb()
+        }
+        onDismissed: root.clearError()
     }
 
     Component.onCompleted: startServer()
