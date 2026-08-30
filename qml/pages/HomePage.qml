@@ -17,14 +17,18 @@ Rectangle {
     signal openLocal()
     signal openDownload()
     signal openPersonalFM()
-    signal openRecent()
-    signal playSong(var song)
+        signal playSong(var song)
 
     property bool isLoggedIn: false
     property string userName: ""
     property var recommendList: []
     property bool loadingRecommend: false
-    property int tabIndex: 0  // 0=推荐
+    property int tabIndex: 0
+
+    // 修复：页面可见时重置底部导航选中状态
+    onVisibleChanged: {
+        if (visible) tabIndex = 0
+    }  // 0=推荐
 
     // 格式化播放量
     function formatPlayCount(count) {
@@ -106,8 +110,7 @@ Rectangle {
                                 onClicked: {
                                     if (modelData.action === "daily") homePage.openPlaylist("daily")
                                     else if (modelData.action === "fm") homePage.openPersonalFM()
-                                    else if (modelData.action === "recent") homePage.openRecent()
-                                }
+                                                                    }
                             }
                         }
                     }
@@ -214,7 +217,7 @@ Rectangle {
                         anchors.fill: parent
                         anchors.margins: -3
                         onClicked: {
-                            console.log("[home] 刷新推荐歌单")
+                            console.log("[home] 换一批推荐歌单")
                             homePage.loadRecommend()
                         }
                     }

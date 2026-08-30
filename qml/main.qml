@@ -1,4 +1,4 @@
-import QtQuick 2.12
+﻿import QtQuick 2.12
 import NeteasePlayer 1.0
 import "pages" as Pages
 import "components"
@@ -135,8 +135,7 @@ Rectangle {
                     onOpenToplist: function(idx) { root.navigateTo("toplist") }
                     onOpenLocal: root.navigateTo("local")
                     onOpenPersonalFM: root.openPersonalFM()
-                    onOpenRecent: root.openRecent()
-                    onPlaySong: function(song) { root.playSong(song) }
+                                        onPlaySong: function(song) { root.playSong(song) }
                 }
             }
         }
@@ -165,17 +164,25 @@ Rectangle {
                     onBackClicked: root.goBack()
                     onPlaySong: function(song) { root.playSong(song) }
                     onPlayAll: function(songs) { root.playAll(songs) }
-                    onLoaded: function(item) {
+                    // 修复：每次 playlistId 变化时重新加载（不仅是第一次）
+                    onPlaylistIdChanged: {
                         var id = root.playlistId
-                        if (id === "daily") item.load("daily")
-                        else if (id && id.indexOf("top_") === 0) {
+                        if (!id) return
+                        if (id === "daily") {
+                            item.load("daily")
+                        } else if (id.indexOf("top_") === 0) {
                             ApiClient.topListDetail(root.playlistIdx, function(d) {
                                 if (d.code === 200 && d.playlist) {
                                     item.playlistName = d.playlist.name
                                     item.parseSongs(d.playlist.tracks || [])
                                 }
                             }, null)
-                        } else if (id) item.load(id)
+                        } else {
+                            item.load(id)
+                        }
+                    }
+                    onLoaded: function(item) {
+                        if (root.playlistId) item.load(root.playlistId)
                     }
                 }
             }
@@ -346,39 +353,6 @@ Rectangle {
         }, function(e) {
             console.log("[fm] 加载错误:", e)
             root.showToast("私人FM加载错误")
-        })
-    }
-
-    // ── 最近播放 ──
-    function openRecent() {
-        console.log("[recent] 加载最近播放...")
-        root.showToast("加载最近播放...")
-        ApiClient.recentSong(100, function(d) {
-            if (d.code === 200 && d.data && d.data.list && d.data.list.length > 0) {
-                var songs = []
-                for (var i = 0; i < Math.min(d.data.list.length, 50); i++) {
-                    var s = d.data.list[i].data
-                    if (!s) continue
-                    songs.push({
-                        id: s.id,
-                        name: s.name,
-                        artist: s.artists && s.artists.length > 0 ? s.artists[0].name : "",
-                        coverImgUrl: s.album ? s.album.picUrl : ""
-                    })
-                }
-                console.log("[recent] 加载到", songs.length, "首歌")
-                if (songs.length > 0) {
-                    root.playAll(songs)
-                } else {
-                    root.showToast("暂无最近播放记录")
-                }
-            } else {
-                console.log("[recent] 加载失败或为空 code:", d.code)
-                root.showToast("最近播放加载失败")
-            }
-        }, function(e) {
-            console.log("[recent] 加载错误:", e)
-            root.showToast("最近播放加载错误")
         })
     }
 
