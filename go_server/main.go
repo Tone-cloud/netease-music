@@ -1,10 +1,9 @@
-package main
+﻿package main
 
 import (
 	"crypto/md5"
 	"crypto/rand"
 	"embed"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -20,7 +19,6 @@ import (
 	"sync"
 	"time"
 
-	qrcode "github.com/skip2/go-qrcode"
 	utls "github.com/refraction-networking/utls"
 )
 
@@ -39,6 +37,7 @@ const (
 	musicDir   = "/userdisk/Music/netease"
 	cacheDir   = "/userdisk/Music/netease/cache"
 	localMusicRoot = "/userdisk/Music"
+	searchHistoryFile = "/userdisk/Music/netease/search_history.json"
 )
 
 // ── 批量下载管理器 ──
@@ -72,9 +71,7 @@ var (
 )
 
 func startBatchDownload(tasks []BatchTask) {
-	batchMu.Lock()
 	if batchRunning {
-		batchMu.Unlock()
 		return
 	}
 	batchTasks = tasks
@@ -218,6 +215,9 @@ func init() {
 		Timeout:   30 * time.Second,
 	}
 	os.MkdirAll(cacheDir, 0755)
+	os.MkdirAll(musicDir, 0755)
+	// 异步清理超过 7 天的缓存文件
+	go cleanOldCache()
 	// 读取 cookies.json（用户从网页端登录获取的 cookies，减少风控）
 	loadCookiesFromFile()
 }
@@ -263,14 +263,17 @@ func main() {
 	http.HandleFunc("/recommend/songs", handleDailyRecommend)
 	http.HandleFunc("/toplist", handleToplist)
 	http.HandleFunc("/top/list", handleTopListDetail)
-	http.HandleFunc("/login/qr/key", handleQrKey)
-	http.HandleFunc("/login/qr/create", handleQrCreate)
-	http.HandleFunc("/login/qr/check", handleQrCheck)
-	http.HandleFunc("/captcha/sent", handleCaptchaSent)
-	http.HandleFunc("/login/cellphone", handleLoginCellphone)
 	http.HandleFunc("/login/status", handleLoginStatus)
 	http.HandleFunc("/logout", handleLogout)
 	http.HandleFunc("/user/playlist", handleUserPlaylist)
+	http.HandleFunc("/user/detail", handleUserDetail)
+	http.HandleFunc("/user/level", handleUserLevel)
+	http.HandleFunc("/user/subcount", handleUserSubcount)
+	http.HandleFunc("/personal_fm", handlePersonalFM)
+	http.HandleFunc("/record/recent/song", handleRecentSong)
+	http.HandleFunc("/like", handleLike)
+	http.HandleFunc("/daily_signin", handleDailySignin)
+	http.HandleFunc("/scrobble", handleScrobble)
 	http.HandleFunc("/download", handleDownload)
 	http.HandleFunc("/cache", handleCache)
 	http.HandleFunc("/downloads", handleDownloads)
@@ -280,6 +283,7 @@ func main() {
 	http.HandleFunc("/local/list", handleLocalList)
 	http.HandleFunc("/local/delete", handleLocalDelete)
 	http.HandleFunc("/audio", handleAudioProxy)
+	http.HandleFunc("/search/history", handleSearchHistory)
 
 	// 异步初始化 cookie（避免阻塞 server 启动导致插件连接超时）
 	go initCookies()
@@ -339,54 +343,11 @@ func startWebLoginServer() {
 	sub, _ := fs.Sub(webFS, "web")
 	mux.Handle("/", http.FileServer(http.FS(sub)))
 	// API
-	mux.HandleFunc("/api/sms/send", handleWebSmsSend)
-	mux.HandleFunc("/api/login/sms", handleWebSmsLogin)
 	mux.HandleFunc("/api/import", handleImportCookies)
 	mux.HandleFunc("/pull", handleWebPull)
 	addr := "0.0.0.0:8667"
 	fmt.Println("[web-login] 登录服务监听于 http://" + addr + "/verify.html")
 	http.ListenAndServe(addr, mux)
-}
-
-func handleWebSmsSend(w http.ResponseWriter, r *http.Request) {
-	phone := r.URL.Query().Get("phone")
-	if phone == "" {
-		writeError(w, "缺少 phone")
-		return
-	}
-	body := fmt.Sprintf(`{"phone":"%s","ctcode":"86"}`, phone)
-	data, err := weapiPost("/weapi/sms/captcha/sent", body)
-	if err != nil {
-		writeError(w, err.Error())
-		return
-	}
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	w.Write(data)
-}
-
-func handleWebSmsLogin(w http.ResponseWriter, r *http.Request) {
-	phone := r.URL.Query().Get("phone")
-	captcha := r.URL.Query().Get("captcha")
-	if phone == "" || captcha == "" {
-		writeError(w, "缺少 phone 或 captcha")
-		return
-	}
-	body := fmt.Sprintf(`{"phone":"%s","captcha":"%s","rememberLogin":"true","csrf_token":""}`, phone, captcha)
-	data, err := weapiPost("/weapi/login/cellphone", body)
-	if err != nil {
-		writeError(w, err.Error())
-		return
-	}
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	w.Write(data)
-	// 登录成功后保存 cookies
-	var resp struct {
-		Code int `json:"code"`
-	}
-	if json.Unmarshal(data, &resp) == nil && resp.Code == 200 {
-		saveCookiesToFile()
-		fmt.Println("[web-login] 短信登录成功，已保存 cookies")
-	}
 }
 
 // 导入 cookies（支持 JSON 格式和字符串格式）
@@ -584,9 +545,7 @@ func weapiPost(path, jsonStr string) ([]byte, error) {
 	req.Header.Set("sec-fetch-mode", "cors")
 	req.Header.Set("sec-fetch-site", "same-origin")
 
-	mu.Lock()
 	resp, err := client.Do(req)
-	mu.Unlock()
 	if err != nil {
 		fmt.Printf("[weapiPost] 请求失败 path=%s err=%s\n", path, err.Error())
 		return nil, err
@@ -597,11 +556,7 @@ func weapiPost(path, jsonStr string) ([]byte, error) {
 		fmt.Printf("[weapiPost] 读取响应失败 path=%s err=%s\n", path, err.Error())
 		return nil, err
 	}
-	preview := string(data)
-	if len(preview) > 200 {
-		preview = preview[:200]
-	}
-	fmt.Printf("[weapiPost] path=%s status=%d body=%s\n", path, resp.StatusCode, preview)
+	fmt.Printf("[weapiPost] path=%s status=%d size=%d\n", path, resp.StatusCode, len(data))
 	return data, nil
 }
 
@@ -612,9 +567,7 @@ func simpleGet(path string) ([]byte, error) {
 	req.Header.Set("Referer", "https://music.163.com/")
 	req.Header.Set("Accept", "application/json, text/plain, */*")
 	req.Header.Set("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
-	mu.Lock()
 	resp, err := client.Do(req)
-	mu.Unlock()
 	if err != nil {
 		return nil, err
 	}
@@ -737,101 +690,6 @@ func handleTopListDetail(w http.ResponseWriter, r *http.Request) {
 	w.Write(data)
 }
 
-func handleQrKey(w http.ResponseWriter, r *http.Request) {
-	data, err := weapiPost("/weapi/login/qrcode/unikey", `{"type":1}`)
-	if err != nil {
-		writeError(w, err.Error())
-		return
-	}
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	w.Write(data)
-}
-
-func handleQrCreate(w http.ResponseWriter, r *http.Request) {
-	key := r.URL.Query().Get("key")
-	if key == "" {
-		writeError(w, "缺少 key")
-		return
-	}
-	// 二维码内容：网易云登录 URL
-	qrContent := "https://music.163.com/login?codekey=" + key
-	// 生成二维码 PNG
-	png, err := qrcode.Encode(qrContent, qrcode.Medium, 256)
-	if err != nil {
-		writeError(w, "生成二维码失败: "+err.Error())
-		return
-	}
-	// 转 base64
-	base64Img := base64.StdEncoding.EncodeToString(png)
-	writeJSON(w, map[string]interface{}{
-		"code":  200,
-		"qrimg": "data:image/png;base64," + base64Img,
-	})
-}
-
-func handleQrCheck(w http.ResponseWriter, r *http.Request) {
-	key := r.URL.Query().Get("key")
-	body := fmt.Sprintf(`{"key":"%s","type":1}`, key)
-	// 官方文档要求：调用务必带上时间戳，防止缓存
-	path := fmt.Sprintf("/weapi/login/qrcode/client/login?timestamp=%d", time.Now().UnixMilli())
-	data, err := weapiPost(path, body)
-	if err != nil {
-		writeError(w, err.Error())
-		return
-	}
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	w.Write(data)
-}
-
-func handleCaptchaSent(w http.ResponseWriter, r *http.Request) {
-	phone := r.URL.Query().Get("phone")
-	if phone == "" {
-		writeError(w, "缺少 phone")
-		return
-	}
-	ctcode := r.URL.Query().Get("ctcode")
-	if ctcode == "" {
-		ctcode = "86"
-	}
-	// 网易云 weapi 接口需要 csrf_token 参数
-	body := fmt.Sprintf(`{"phone":"%s","ctcode":"%s","csrf_token":""}`, phone, ctcode)
-	fmt.Printf("[captcha/sent] phone=%s ctcode=%s body=%s\n", phone, ctcode, body)
-	data, err := weapiPost("/weapi/sms/captcha/sent", body)
-	if err != nil {
-		fmt.Printf("[captcha/sent] error: %v\n", err)
-		writeError(w, err.Error())
-		return
-	}
-	fmt.Printf("[captcha/sent] response: %s\n", string(data))
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	w.Write(data)
-}
-
-func handleLoginCellphone(w http.ResponseWriter, r *http.Request) {
-	phone := r.URL.Query().Get("phone")
-	captcha := r.URL.Query().Get("captcha")
-	if phone == "" || captcha == "" {
-		writeError(w, "缺少 phone 或 captcha")
-		return
-	}
-	body := fmt.Sprintf(`{"phone":"%s","captcha":"%s","rememberLogin":"true","csrf_token":""}`, phone, captcha)
-	data, err := weapiPost("/weapi/login/cellphone", body)
-	if err != nil {
-		writeError(w, err.Error())
-		return
-	}
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	w.Write(data)
-	// 登录成功后保存 cookies 到文件
-	var resp struct {
-		Code int `json:"code"`
-	}
-	if json.Unmarshal(data, &resp) == nil && resp.Code == 200 {
-		saveCookiesToFile()
-		fmt.Println("[cookies] 登录成功，已保存 cookies 到 cookies.json")
-	}
-}
-
 // 保存当前 cookies 到 cookies.json
 func saveCookiesToFile() {
 	exePath, err := os.Executable()
@@ -877,6 +735,129 @@ func handleUserPlaylist(w http.ResponseWriter, r *http.Request) {
 	}
 	body := fmt.Sprintf(`{"uid":%s,"limit":30,"offset":0,"includeVideo":true}`, uid)
 	data, err := weapiPost("/weapi/user/playlist", body)
+	if err != nil {
+		writeError(w, err.Error())
+		return
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Write(data)
+}
+
+// ── 用户详情（等级、签名、关注/粉丝、听歌次数）──
+func handleUserDetail(w http.ResponseWriter, r *http.Request) {
+	uid := r.URL.Query().Get("uid")
+	if uid == "" {
+		writeError(w, "缺少 uid")
+		return
+	}
+	data, err := weapiPost("/weapi/v1/user/detail/"+uid, `{}`)
+	if err != nil {
+		writeError(w, err.Error())
+		return
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Write(data)
+}
+
+// ── 用户等级 ──
+func handleUserLevel(w http.ResponseWriter, r *http.Request) {
+	data, err := weapiPost("/weapi/user/level", `{}`)
+	if err != nil {
+		writeError(w, err.Error())
+		return
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Write(data)
+}
+
+// ── 用户订阅统计（歌单、歌手、专辑、MV等数量）──
+func handleUserSubcount(w http.ResponseWriter, r *http.Request) {
+	data, err := weapiPost("/weapi/user/subcount", `{}`)
+	if err != nil {
+		writeError(w, err.Error())
+		return
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Write(data)
+}
+
+// ── 私人 FM ──
+func handlePersonalFM(w http.ResponseWriter, r *http.Request) {
+	data, err := weapiPost("/weapi/v1/radio/get", `{}`)
+	if err != nil {
+		writeError(w, err.Error())
+		return
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Write(data)
+}
+
+// ── 最近播放记录 ──
+func handleRecentSong(w http.ResponseWriter, r *http.Request) {
+	limit := r.URL.Query().Get("limit")
+	if limit == "" { limit = "100" }
+	// 最近播放是 GET 接口，不是 weapi POST
+	data, err := simpleGet("/api/record/recent/song?limit=" + limit)
+	if err != nil {
+		writeError(w, err.Error())
+		return
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Write(data)
+}
+// ── 喜欢/取消喜欢音乐 ──
+func handleLike(w http.ResponseWriter, r *http.Request) {
+	id := r.URL.Query().Get("id")
+	like := r.URL.Query().Get("like")
+	if id == "" {
+		writeError(w, "缺少 id")
+		return
+	}
+	if like == "" {
+		like = "true"
+	}
+	body := fmt.Sprintf(`{"alg":"itembased","trackId":%s,"like":%s,"time":25}`, id, like)
+	data, err := weapiPost("/weapi/radio/like", body)
+	if err != nil {
+		writeError(w, err.Error())
+		return
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Write(data)
+}
+
+// ── 每日签到（+3经验，安卓端）──
+func handleDailySignin(w http.ResponseWriter, r *http.Request) {
+	// type=1 安卓端（+3经验），type=0 PC端（+2经验）
+	body := `{"type":1}`
+	data, err := weapiPost("/weapi/point/dailyTask", body)
+	if err != nil {
+		writeError(w, err.Error())
+		return
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Write(data)
+}
+
+// ── 提交听歌记录（+0.5经验/首，每天上限10首）──
+func handleScrobble(w http.ResponseWriter, r *http.Request) {
+	id := r.URL.Query().Get("id")
+	sourceid := r.URL.Query().Get("sourceid")
+	timeStr := r.URL.Query().Get("time")
+	if id == "" {
+		writeError(w, "缺少 id")
+		return
+	}
+	if sourceid == "" {
+		sourceid = "0"
+	}
+	if timeStr == "" {
+		timeStr = "0"
+	}
+	// 构造听歌记录日志
+	logs := fmt.Sprintf(`[{"action":"play","json":{"id":%s,"sourceId":%s,"time":%s,"download":0,"end":"ui","type":"song","wifi":0}}]`, id, sourceid, timeStr)
+	body := fmt.Sprintf(`{"logs":%s}`, logs)
+	data, err := weapiPost("/weapi/feedback/weblog", body)
 	if err != nil {
 		writeError(w, err.Error())
 		return
@@ -1137,9 +1118,76 @@ func downloadFile(url, dest string) error {
 }
 
 // 清理文件名中的非法字符
+// 清理超过 7 天的缓存文件，避免缓存目录无限增长
+func cleanOldCache() {
+	files, err := os.ReadDir(cacheDir)
+	if err != nil { return }
+	now := time.Now()
+	cleaned := 0
+	for _, f := range files {
+		if f.IsDir() { continue }
+		info, err := f.Info()
+		if err != nil { continue }
+		if now.Sub(info.ModTime()) > 7*24*time.Hour {
+			os.Remove(filepath.Join(cacheDir, f.Name()))
+			cleaned++
+		}
+	}
+	if cleaned > 0 {
+		fmt.Printf("[cache] 清理了 %d 个过期缓存文件\n", cleaned)
+	}
+}
+
 func sanitizeFilename(name string) string {
 	replacer := strings.NewReplacer("/", "_", "\\", "_", ":", "_", "*", "_", "?", "_", "\"", "_", "<", "_", ">", "_", "|", "_")
 	return strings.TrimSpace(replacer.Replace(name))
+}
+
+
+// ── 搜索历史持久化 ──
+// 保存到本地 JSON 文件，重启后不丢失
+
+func loadSearchHistory() []string {
+	data, err := os.ReadFile(searchHistoryFile)
+	if err != nil { return []string{} }
+	var list []string
+	if err := json.Unmarshal(data, &list); err != nil { return []string{} }
+	return list
+}
+
+func saveSearchHistory(list []string) {
+	os.MkdirAll(filepath.Dir(searchHistoryFile), 0755)
+	data, _ := json.Marshal(list)
+	os.WriteFile(searchHistoryFile, data, 0644)
+}
+
+func handleSearchHistory(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case "GET":
+		list := loadSearchHistory()
+		writeJSON(w, map[string]interface{}{"code": 200, "history": list})
+	case "POST":
+		var req struct { Keyword string `json:"keyword"` }
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeError(w, "JSON 解析失败")
+			return
+		}
+		kw := strings.TrimSpace(req.Keyword)
+		if kw == "" { writeError(w, "关键词为空"); return }
+		list := loadSearchHistory()
+		newList := []string{kw}
+		for _, item := range list {
+			if item != kw { newList = append(newList, item) }
+		}
+		if len(newList) > 20 { newList = newList[:20] }
+		saveSearchHistory(newList)
+		writeJSON(w, map[string]interface{}{"code": 200, "history": newList})
+	case "DELETE":
+		saveSearchHistory([]string{})
+		writeJSON(w, map[string]interface{}{"code": 200, "msg": "已清除"})
+	default:
+		writeError(w, "不支持的方法")
+	}
 }
 
 // 音频流代理：C++ 播放器从本地 127.0.0.1:8001/audio?url=xxx 读取，Go 转发到网易云 CDN

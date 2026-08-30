@@ -63,13 +63,6 @@ Item {
     readonly property int fontTitle: Math.round(14 * fontScale)
     readonly property int fontHuge: Math.round(18 * fontScale)
 
-    // 兼容旧属性名
-    readonly property int fontXLarge: fontHuge
-    readonly property color fontMuted: textTertiary
-    readonly property color accentSoft: primaryLight
-    readonly property color textMuted: textTertiary
-    readonly property color bgCardAlt: bgCardHover
-
     // ── 间距 ──
     readonly property int spacingTiny: 2
     readonly property int spacingSmall: 4

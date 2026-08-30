@@ -88,6 +88,7 @@ Rectangle {
         anchors.left: parent.left
         anchors.right: parent.right
         clip: true
+        cacheBuffer: 200
         model: toplistPage.toplists
 
         delegate: Rectangle {

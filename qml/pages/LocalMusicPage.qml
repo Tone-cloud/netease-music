@@ -140,6 +140,7 @@ Rectangle {
         anchors.left: parent.left
         anchors.right: parent.right
         clip: true
+        cacheBuffer: 200
         visible: localPage.files.length > 0
         model: localPage.files
 

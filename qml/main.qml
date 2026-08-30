@@ -134,6 +134,8 @@ Rectangle {
                     onOpenUser: root.navigateTo("user")
                     onOpenToplist: function(idx) { root.navigateTo("toplist") }
                     onOpenLocal: root.navigateTo("local")
+                    onOpenPersonalFM: root.openPersonalFM()
+                    onOpenRecent: root.openRecent()
                     onPlaySong: function(song) { root.playSong(song) }
                 }
             }
@@ -221,7 +223,7 @@ Rectangle {
                     onBackClicked: root.goBack()
                     onOpenLogin: root.navigateTo("login")
                     onOpenPlaylist: function(id) { root.navigateTo("playlist", { id: id }) }
-                    onOpenDownloads: root.navigateTo("download")
+                    onOpenLocal: root.navigateTo("local")
                     onLogout: function() {
                         ApiClient.logout(function() {
                             root.isLoggedIn = false
@@ -229,22 +231,6 @@ Rectangle {
                             root.showToast("已退出登录")
                             root.goBack()
                         })
-                    }
-                }
-            }
-        }
-
-        // ── 下载页 ──
-        Loader {
-            active: currentPage === "download"
-            visible: currentPage === "download"
-            anchors.fill: parent
-            sourceComponent: Component {
-                Pages.DownloadPage {
-                    onBackClicked: root.goBack()
-                    onPlayLocal: function(path, name) {
-                        player.play(path)
-                        root.showToast("正在播放: " + name)
                     }
                 }
             }
@@ -302,8 +288,98 @@ Rectangle {
             if (d.code === 200 && d.profile) {
                 isLoggedIn = true
                 userInfo = d.profile
+                console.log("[login] 登录成功，开始签到...")
+                autoSignin()
+            } else {
+                console.log("[login] 未登录 code:", d.code)
             }
-        }, null)
+        }, function(e) {
+            console.log("[login] 检查登录状态错误:", e)
+        })
+    }
+
+    // 自动签到（每天一次，+3经验）
+    property string lastSigninDate: ""
+    function autoSignin() {
+        var now = new Date()
+        var today = now.getFullYear() + "-" + (now.getMonth()+1) + "-" + now.getDate()
+        if (lastSigninDate === today) {
+            console.log("[signin] 今天已签到，跳过")
+            return
+        }
+        lastSigninDate = today
+        console.log("[signin] 开始签到...")
+        ApiClient.dailySignin(function(d) {
+            if (d.code === 200) {
+                console.log("[signin] 签到成功 +3经验")
+                root.showToast("签到成功 +3经验")
+            } else {
+                console.log("[signin] 签到结果 code:", d.code, "msg:", d.msg || d.message || "")
+            }
+        }, function(e) {
+            console.log("[signin] 签到失败:", e)
+        })
+    }
+
+    // ── 私人 FM ──
+    function openPersonalFM() {
+        console.log("[fm] 加载私人FM...")
+        root.showToast("加载私人FM...")
+        ApiClient.personalFM(function(d) {
+            if (d.code === 200 && d.data && d.data.length > 0) {
+                var songs = []
+                for (var i = 0; i < d.data.length; i++) {
+                    var s = d.data[i]
+                    songs.push({
+                        id: s.id,
+                        name: s.name,
+                        artist: s.artists && s.artists.length > 0 ? s.artists[0].name : "",
+                        coverImgUrl: s.album ? s.album.picUrl : ""
+                    })
+                }
+                console.log("[fm] 加载到", songs.length, "首歌")
+                root.playAll(songs)
+            } else {
+                console.log("[fm] 加载失败 code:", d.code)
+                root.showToast("私人FM加载失败")
+            }
+        }, function(e) {
+            console.log("[fm] 加载错误:", e)
+            root.showToast("私人FM加载错误")
+        })
+    }
+
+    // ── 最近播放 ──
+    function openRecent() {
+        console.log("[recent] 加载最近播放...")
+        root.showToast("加载最近播放...")
+        ApiClient.recentSong(100, function(d) {
+            if (d.code === 200 && d.data && d.data.list && d.data.list.length > 0) {
+                var songs = []
+                for (var i = 0; i < Math.min(d.data.list.length, 50); i++) {
+                    var s = d.data.list[i].data
+                    if (!s) continue
+                    songs.push({
+                        id: s.id,
+                        name: s.name,
+                        artist: s.artists && s.artists.length > 0 ? s.artists[0].name : "",
+                        coverImgUrl: s.album ? s.album.picUrl : ""
+                    })
+                }
+                console.log("[recent] 加载到", songs.length, "首歌")
+                if (songs.length > 0) {
+                    root.playAll(songs)
+                } else {
+                    root.showToast("暂无最近播放记录")
+                }
+            } else {
+                console.log("[recent] 加载失败或为空 code:", d.code)
+                root.showToast("最近播放加载失败")
+            }
+        }, function(e) {
+            console.log("[recent] 加载错误:", e)
+            root.showToast("最近播放加载错误")
+        })
     }
 
     // ── 播放控制 ──

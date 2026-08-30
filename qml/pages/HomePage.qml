@@ -1,4 +1,4 @@
-import QtQuick 2.12
+﻿import QtQuick 2.12
 import "../components"
 
 Rectangle {
@@ -16,6 +16,8 @@ Rectangle {
     signal openToplist(int idx)
     signal openLocal()
     signal openDownload()
+    signal openPersonalFM()
+    signal openRecent()
     signal playSong(var song)
 
     property bool isLoggedIn: false
@@ -23,6 +25,14 @@ Rectangle {
     property var recommendList: []
     property bool loadingRecommend: false
     property int tabIndex: 0  // 0=推荐
+
+    // 格式化播放量
+    function formatPlayCount(count) {
+        if (!count || count <= 0) return ""
+        if (count >= 100000000) return (count / 100000000).toFixed(1) + "亿"
+        if (count >= 10000) return (count / 10000).toFixed(count >= 100000 ? 0 : 1) + "万"
+        return String(count)
+    }
 
     // ── 内容区 (无标题栏，高度 = 170 - 26 = 144px) ──
     Flickable {
@@ -44,51 +54,121 @@ Rectangle {
             width: parent.width
             spacing: Theme.spacingSmall
 
-            // 快捷入口
-            Row {
+            // 快捷入口（两行）
+            Column {
                 width: parent.width
                 spacing: Theme.spacingSmall
-                Repeater {
-                    model: [
-                        { label: "每日推荐", action: "daily" },
-                        { label: "排行榜", action: "toplist" },
-                        { label: "本地音乐", action: "local" }
-                    ]
-                    Rectangle {
-                        width: (parent.width - Theme.spacingSmall * 2) / 3
-                        height: 30
-                        color: Theme.bgCard
-                        radius: Theme.radiusLarge
-                        border.color: Theme.borderLight
-                        border.width: 0.5
 
-                        scale: quickMouse.pressed ? 0.96 : 1.0
-                        Behavior on scale { NumberAnimation { duration: 80 } }
+                // 第一行：每日推荐、私人FM、最近播放
+                Row {
+                    width: parent.width
+                    spacing: Theme.spacingSmall
+                    Repeater {
+                        model: [
+                            { label: "每日推荐", action: "daily", icon: "📅" },
+                            { label: "私人FM", action: "fm", icon: "📻" },
+                            { label: "最近播放", action: "recent", icon: "⏱" }
+                        ]
+                        Rectangle {
+                            width: (parent.width - Theme.spacingSmall * 2) / 3
+                            height: 36
+                            color: Theme.bgCard
+                            radius: Theme.radiusLarge
+                            border.color: Theme.borderLight
+                            border.width: 0.5
 
-                        Text {
-                            anchors.centerIn: parent
-                            text: modelData.label
-                            color: Theme.textSecondary
-                            font.pixelSize: Theme.fontTiny
-                            font.family: Theme.fontFamily
-                            font.bold: true
+                            scale: quickMouse.pressed ? 0.96 : 1.0
+                            Behavior on scale { NumberAnimation { duration: 80 } }
+
+                            Column {
+                                anchors.centerIn: parent
+                                spacing: 1
+
+                                Text {
+                                    anchors.horizontalCenter: parent.horizontalCenter
+                                    text: modelData.icon
+                                    font.pixelSize: 12
+                                }
+                                Text {
+                                    anchors.horizontalCenter: parent.horizontalCenter
+                                    text: modelData.label
+                                    color: Theme.textSecondary
+                                    font.pixelSize: Theme.fontTiny
+                                    font.family: Theme.fontFamily
+                                    font.bold: true
+                                }
+                            }
+
+                            MouseArea {
+                                id: quickMouse
+                                anchors.fill: parent
+                                anchors.margins: -3
+                                onClicked: {
+                                    if (modelData.action === "daily") homePage.openPlaylist("daily")
+                                    else if (modelData.action === "fm") homePage.openPersonalFM()
+                                    else if (modelData.action === "recent") homePage.openRecent()
+                                }
+                            }
                         }
+                    }
+                }
 
-                        MouseArea {
-                            id: quickMouse
-                            anchors.fill: parent
-                            anchors.margins: -3
-                            onClicked: {
-                                if (modelData.action === "daily") homePage.openPlaylist("daily")
-                                else if (modelData.action === "toplist") homePage.openToplist()
-                                else if (modelData.action === "local") homePage.openLocal()
+                // 第二行：排行榜、本地音乐、我的
+                Row {
+                    width: parent.width
+                    spacing: Theme.spacingSmall
+                    Repeater {
+                        model: [
+                            { label: "排行榜", action: "toplist", icon: "🏆" },
+                            { label: "本地音乐", action: "local", icon: "🎵" },
+                            { label: "我的", action: "user", icon: "👤" }
+                        ]
+                        Rectangle {
+                            width: (parent.width - Theme.spacingSmall * 2) / 3
+                            height: 36
+                            color: Theme.bgCard
+                            radius: Theme.radiusLarge
+                            border.color: Theme.borderLight
+                            border.width: 0.5
+
+                            scale: quickMouse2.pressed ? 0.96 : 1.0
+                            Behavior on scale { NumberAnimation { duration: 80 } }
+
+                            Column {
+                                anchors.centerIn: parent
+                                spacing: 1
+
+                                Text {
+                                    anchors.horizontalCenter: parent.horizontalCenter
+                                    text: modelData.icon
+                                    font.pixelSize: 12
+                                }
+                                Text {
+                                    anchors.horizontalCenter: parent.horizontalCenter
+                                    text: modelData.label
+                                    color: Theme.textSecondary
+                                    font.pixelSize: Theme.fontTiny
+                                    font.family: Theme.fontFamily
+                                    font.bold: true
+                                }
+                            }
+
+                            MouseArea {
+                                id: quickMouse2
+                                anchors.fill: parent
+                                anchors.margins: -3
+                                onClicked: {
+                                    if (modelData.action === "toplist") homePage.openToplist(0)
+                                    else if (modelData.action === "local") homePage.openLocal()
+                                    else if (modelData.action === "user") homePage.openUser()
+                                }
                             }
                         }
                     }
                 }
             }
 
-            // 推荐歌单标题
+            // 推荐歌单标题（带刷新按钮）
             Row {
                 width: parent.width
                 Text {
@@ -97,6 +177,7 @@ Rectangle {
                     font.pixelSize: Theme.fontNormal
                     font.bold: true
                     font.family: Theme.fontFamily
+                    anchors.verticalCenter: parent.verticalCenter
                 }
                 Item { width: 1 }
                 Text {
@@ -105,6 +186,38 @@ Rectangle {
                     font.pixelSize: Theme.fontTiny
                     font.family: Theme.fontFamily
                     anchors.verticalCenter: parent.verticalCenter
+                }
+                Item { width: 1; height: 1 }
+                // 刷新按钮
+                Rectangle {
+                    width: 20
+                    height: 20
+                    radius: 10
+                    color: refreshMouse.pressed ? Theme.withAlpha(Theme.primary, 0.2) : Theme.bgCard
+                    border.color: Theme.borderLight
+                    border.width: 0.5
+                    anchors.verticalCenter: parent.verticalCenter
+
+                    Text {
+                        anchors.centerIn: parent
+                        text: "↻"
+                        color: Theme.primary
+                        font.pixelSize: Theme.fontNormal
+                        font.bold: true
+                        font.family: Theme.fontFamily
+                        rotation: homePage.loadingRecommend ? 180 : 0
+                        Behavior on rotation { NumberAnimation { duration: 500 } }
+                    }
+
+                    MouseArea {
+                        id: refreshMouse
+                        anchors.fill: parent
+                        anchors.margins: -3
+                        onClicked: {
+                            console.log("[home] 刷新推荐歌单")
+                            homePage.loadRecommend()
+                        }
+                    }
                 }
             }
 
@@ -126,7 +239,7 @@ Rectangle {
 
                         Rectangle {
                             width: 72
-                            height: 82
+                            height: 88
                             color: Theme.bgCard
                             radius: Theme.radiusMedium
                             border.color: Theme.borderLight
@@ -138,12 +251,12 @@ Rectangle {
                             Column {
                                 anchors.fill: parent
                                 anchors.margins: 4
-                                spacing: 3
+                                spacing: 4
 
                                 // 封面图
                                 Rectangle {
                                     width: parent.width
-                                    height: 52
+                                    height: 56
                                     radius: Theme.radiusSmall
                                     clip: true
                                     color: Theme.bgSecondary
@@ -158,30 +271,31 @@ Rectangle {
                                         sourceSize.height: 100
                                     }
 
-                                    // 播放数角标
+                                    // 播放数角标（优化：更大字体，显示所有播放量）
                                     Rectangle {
                                         anchors.top: parent.top
                                         anchors.right: parent.right
                                         anchors.topMargin: 2
                                         anchors.rightMargin: 2
-                                        width: playCountText.width + 6
-                                        height: 12
-                                        radius: 6
-                                        color: "#80000000"
+                                        width: playCountText.width + 8
+                                        height: 14
+                                        radius: 7
+                                        color: "#99000000"
                                         visible: modelData.playcount > 0
 
                                         Text {
                                             id: playCountText
                                             anchors.centerIn: parent
-                                            text: modelData.playcount >= 100000 ? (modelData.playcount / 10000).toFixed(0) + "万" : ""
+                                            text: homePage.formatPlayCount(modelData.playcount)
                                             color: "white"
-                                            font.pixelSize: 7
+                                            font.pixelSize: 9
                                             font.family: Theme.fontFamily
+                                            font.bold: true
                                         }
                                     }
                                 }
 
-                                // 歌单名称
+                                // 歌单名称（单行，bili风格）
                                 Text {
                                     text: modelData.name || ""
                                     color: Theme.textSecondary
@@ -189,8 +303,8 @@ Rectangle {
                                     font.family: Theme.fontFamily
                                     elide: Text.ElideRight
                                     width: parent.width
-                                    wrapMode: Text.WrapAtWordBoundaryOrAnywhere
-                                    maximumLineCount: 2
+                                    maximumLineCount: 1
+                                    wrapMode: Text.NoWrap
                                 }
                             }
 
@@ -355,9 +469,11 @@ Rectangle {
             if (d.code === 200) {
                 var list = d.recommend || d.playlists || []
                 homePage.recommendList = list.slice(0, 12)
+                console.log("[home] 推荐歌单加载完成，共", homePage.recommendList.length, "个")
             }
         }, function(e) {
             homePage.loadingRecommend = false
+            console.log("[home] 推荐歌单加载失败:", e)
         })
     }
 

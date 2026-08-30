@@ -86,90 +86,13 @@ Rectangle {
         }
     }
 
-    // ── 歌单信息区（封面+名称+数量）──
+    // ── 歌单信息+操作栏（合并，节省空间）──
     Rectangle {
         id: infoBar
         width: parent.width
-        height: 52
+        height: 44
         color: Theme.bgSecondary
         anchors.top: topBar.bottom
-
-        Rectangle {
-            width: parent.width
-            height: 1
-            anchors.bottom: parent.bottom
-            color: Theme.borderLight
-        }
-
-        Row {
-            anchors.fill: parent
-            anchors.margins: 6
-            spacing: 8
-
-            // 封面图
-            Rectangle {
-                width: 40
-                height: 40
-                radius: Theme.radiusMedium
-                clip: true
-                color: Theme.bgTertiary
-                anchors.verticalCenter: parent.verticalCenter
-
-                Image {
-                    id: coverImage
-                    anchors.fill: parent
-                    source: playlistPage.coverImgUrl
-                    fillMode: Image.PreserveAspectCrop
-                    asynchronous: true
-                    cache: true
-                    sourceSize.width: 80
-                    sourceSize.height: 80
-                }
-
-                // 无封面时显示音乐图标
-                Text {
-                    anchors.centerIn: parent
-                    text: "♪"
-                    color: Theme.textTertiary
-                    font.pixelSize: Theme.fontLarge
-                    visible: !coverImage.status || coverImage.status === Image.Error
-                }
-            }
-
-            // 歌单信息
-            Column {
-                anchors.verticalCenter: parent.verticalCenter
-                spacing: 2
-                width: parent.width - 56
-
-                Text {
-                    text: playlistPage.playlistName
-                    color: Theme.textPrimary
-                    font.pixelSize: Theme.fontSmall
-                    font.bold: true
-                    font.family: Theme.fontFamily
-                    elide: Text.ElideRight
-                    width: parent.width
-                    maximumLineCount: 1
-                }
-
-                Text {
-                    text: (playlistPage.playCount > 0 ? "播放量: " + (playlistPage.playCount >= 10000 ? (playlistPage.playCount / 10000).toFixed(1) + "万" : playlistPage.playCount) + "  ·  " : "") + playlistPage.songs.length + " 首歌曲"
-                    color: Theme.textTertiary
-                    font.pixelSize: Theme.fontTiny
-                    font.family: Theme.fontFamily
-                }
-            }
-        }
-    }
-
-    // ── 操作栏（播放全部 + 下载全部）──
-    Rectangle {
-        id: actionBar
-        width: parent.width
-        height: 28
-        color: Theme.bgSecondary
-        anchors.top: infoBar.bottom
 
         Rectangle {
             width: parent.width
@@ -184,83 +107,167 @@ Rectangle {
             anchors.rightMargin: 8
             spacing: 8
 
-            // 播放全部
+            // 封面
             Rectangle {
-                width: (parent.width - 8) / 2
-                height: 20
+                width: 32
+                height: 32
+                radius: Theme.radiusSmall
+                clip: true
+                color: Theme.bgTertiary
                 anchors.verticalCenter: parent.verticalCenter
-                color: playAllMouse.pressed ? Theme.primaryDark : Theme.primary
-                radius: Theme.radiusRound
 
-                scale: playAllMouse.pressed ? 0.93 : 1.0
-                Behavior on scale { NumberAnimation { duration: 80 } }
+                Image {
+                    id: coverImage
+                    anchors.fill: parent
+                    source: playlistPage.coverImgUrl
+                    fillMode: Image.PreserveAspectCrop
+                    asynchronous: true
+                    cache: true
+                    sourceSize.width: 64
+                    sourceSize.height: 64
+                }
 
                 Text {
                     anchors.centerIn: parent
-                    text: "▶ 播放全部"
-                    color: Theme.textOnPrimary
-                    font.pixelSize: Theme.fontTiny
-                    font.family: Theme.fontFamily
-                    font.bold: true
-                }
-
-                MouseArea {
-                    id: playAllMouse
-                    anchors.fill: parent
-                    onClicked: if (playlistPage.songs.length > 0) playlistPage.playAll(playlistPage.songs)
+                    text: "♪"
+                    color: Theme.textTertiary
+                    font.pixelSize: Theme.fontMedium
+                    visible: !coverImage.status || coverImage.status === Image.Error
                 }
             }
 
-            // 下载全部
-            Rectangle {
-                width: (parent.width - 8) / 2
-                height: 20
+            // 歌单信息
+            Column {
                 anchors.verticalCenter: parent.verticalCenter
-                color: downloadAllMouse.pressed ? Theme.bgCardHover : Theme.bgCard
-                border.color: Theme.primary
-                border.width: 1
-                radius: Theme.radiusRound
-
-                scale: downloadAllMouse.pressed ? 0.93 : 1.0
-                Behavior on scale { NumberAnimation { duration: 80 } }
+                spacing: 1
+                width: parent.width - 32 - 8 - 80
 
                 Text {
-                    anchors.centerIn: parent
-                    text: playlistPage.batchDownloading ? "下载中..." : "↓ 下载全部"
-                    color: Theme.primary
-                    font.pixelSize: Theme.fontTiny
-                    font.family: Theme.fontFamily
+                    text: playlistPage.playlistName
+                    color: Theme.textPrimary
+                    font.pixelSize: Theme.fontSmall
                     font.bold: true
+                    font.family: Theme.fontFamily
+                    elide: Text.ElideRight
+                    width: parent.width
+                    maximumLineCount: 1
                 }
 
-                MouseArea {
-                    id: downloadAllMouse
-                    anchors.fill: parent
-                    onClicked: if (!playlistPage.batchDownloading && playlistPage.songs.length > 0) playlistPage.startBatchDownload()
+                Text {
+                    text: (playlistPage.playCount > 0 ? formatCount(playlistPage.playCount) + "次  ·  " : "") + playlistPage.songs.length + "首"
+                    color: Theme.textTertiary
+                    font.pixelSize: Theme.fontTiny
+                    font.family: Theme.fontFamily
+                }
+            }
+
+            // 操作按钮组：播放全部 + 下载
+            Row {
+                anchors.verticalCenter: parent.verticalCenter
+                spacing: 4
+
+                // 播放全部按钮（紧凑）
+                Rectangle {
+                    width: 44
+                    height: 24
+                    color: playAllMouse.pressed ? Theme.primaryDark : Theme.primary
+                    radius: Theme.radiusRound
+
+                    scale: playAllMouse.pressed ? 0.93 : 1.0
+                    Behavior on scale { NumberAnimation { duration: 80 } }
+
+                    Text {
+                        anchors.centerIn: parent
+                        text: "▶全部"
+                        color: Theme.textOnPrimary
+                        font.pixelSize: Theme.fontTiny
+                        font.family: Theme.fontFamily
+                        font.bold: true
+                    }
+
+                    MouseArea {
+                        id: playAllMouse
+                        anchors.fill: parent
+                        onClicked: if (playlistPage.songs.length > 0) playlistPage.playAll(playlistPage.songs)
+                    }
+                }
+
+                // 下载全部按钮
+                Rectangle {
+                    width: 28
+                    height: 24
+                    color: downloadMouse.pressed ? Theme.withAlpha(Theme.primary, 0.3) : Theme.bgCard
+                    border.color: Theme.primary
+                    border.width: 0.5
+                    radius: Theme.radiusRound
+                    visible: !playlistPage.batchDownloading
+
+                    scale: downloadMouse.pressed ? 0.93 : 1.0
+                    Behavior on scale { NumberAnimation { duration: 80 } }
+
+                    Text {
+                        anchors.centerIn: parent
+                        text: "↓"
+                        color: Theme.primary
+                        font.pixelSize: Theme.fontNormal
+                        font.bold: true
+                        font.family: Theme.fontFamily
+                    }
+
+                    MouseArea {
+                        id: downloadMouse
+                        anchors.fill: parent
+                        anchors.margins: -3
+                        onClicked: {
+                            console.log("[playlist] 开始批量下载")
+                            playlistPage.startBatchDownload()
+                        }
+                    }
+                }
+
+                // 下载中状态（显示进度数字）
+                Rectangle {
+                    width: 44
+                    height: 24
+                    color: Theme.withAlpha(Theme.primary, 0.15)
+                    border.color: Theme.primary
+                    border.width: 0.5
+                    radius: Theme.radiusRound
+                    visible: playlistPage.batchDownloading
+
+                    Text {
+                        anchors.centerIn: parent
+                        text: playlistPage.batchDone + "/" + playlistPage.batchTotal
+                        color: Theme.primary
+                        font.pixelSize: Theme.fontTiny
+                        font.family: Theme.fontFamily
+                        font.bold: true
+                    }
                 }
             }
         }
     }
 
-    // ── 批量下载进度条 ──
+    // ── 批量下载进度条（浮动，不占列表空间）──
     Rectangle {
         id: batchProgressBar
         width: parent.width
-        height: 22
-        color: Theme.bgCard
-        anchors.top: actionBar.bottom
+        height: 18
+        color: Theme.withAlpha(Theme.primary, 0.15)
+        anchors.top: infoBar.bottom
         visible: playlistPage.batchDownloading
+        z: 10
 
         Rectangle {
             id: batchProgressFill
             height: parent.height
-            color: Theme.withAlpha(Theme.primary, 0.3)
+            color: Theme.withAlpha(Theme.primary, 0.4)
             width: playlistPage.batchTotal > 0 ? (playlistPage.batchDone / playlistPage.batchTotal) * parent.width : 0
         }
 
         Text {
             anchors.centerIn: parent
-            text: "下载中 " + playlistPage.batchDone + "/" + playlistPage.batchTotal + "  " + playlistPage.batchCurrentName
+            text: "下载 " + playlistPage.batchDone + "/" + playlistPage.batchTotal + (playlistPage.batchCurrentName ? "  " + playlistPage.batchCurrentName : "")
             color: Theme.textPrimary
             font.pixelSize: Theme.fontTiny
             font.family: Theme.fontFamily
@@ -270,6 +277,7 @@ Rectangle {
     // ── 加载状态 ──
     Text {
         anchors.centerIn: parent
+        anchors.topMargin: 44
         text: playlistPage.loading ? "加载中..." : "暂无歌曲"
         color: Theme.textTertiary
         font.pixelSize: Theme.fontSmall
@@ -277,46 +285,69 @@ Rectangle {
         visible: playlistPage.songs.length === 0
     }
 
-    // ── 歌曲列表 ──
+    // ── 歌曲列表（占满剩余空间）──
     ListView {
         id: songList
-        anchors.top: batchProgressBar.bottom
+        anchors.top: infoBar.bottom
         anchors.bottom: parent.bottom
         anchors.left: parent.left
         anchors.right: parent.right
         clip: true
+        cacheBuffer: 300
         visible: playlistPage.songs.length > 0
         model: playlistPage.songs
+        spacing: 0
 
         delegate: Rectangle {
+            id: songItem
             width: parent.width
-            height: 28
-            color: index % 2 === 0 ? Theme.bgPrimary : Theme.bgCard
+            height: 34
+            color: songMouse.pressed ? Theme.bgCardHover : (index % 2 === 0 ? Theme.bgPrimary : Theme.bgCard)
 
-            scale: songMouse.pressed ? 0.98 : 1.0
-            Behavior on scale { NumberAnimation { duration: 60 } }
+            Behavior on color { ColorAnimation { duration: 80 } }
 
             Row {
                 anchors.fill: parent
                 anchors.leftMargin: 8
                 anchors.rightMargin: 8
-                spacing: 6
+                spacing: 8
 
                 // 序号
                 Text {
                     anchors.verticalCenter: parent.verticalCenter
                     text: index + 1
-                    color: Theme.textTertiary
+                    color: index < 3 ? Theme.primary : Theme.textTertiary
                     font.pixelSize: Theme.fontTiny
                     font.family: Theme.fontFamily
-                    width: 16
+                    font.bold: index < 3
+                    width: 14
                     horizontalAlignment: Text.AlignHCenter
+                }
+
+                // 专辑封面小图
+                Rectangle {
+                    width: 24
+                    height: 24
+                    radius: 4
+                    clip: true
+                    color: Theme.bgTertiary
+                    anchors.verticalCenter: parent.verticalCenter
+
+                    Image {
+                        anchors.fill: parent
+                        source: modelData.cover || ""
+                        fillMode: Image.PreserveAspectCrop
+                        asynchronous: true
+                        cache: true
+                        sourceSize.width: 48
+                        sourceSize.height: 48
+                    }
                 }
 
                 // 歌曲信息
                 Column {
                     anchors.verticalCenter: parent.verticalCenter
-                    width: parent.width - 50
+                    width: parent.width - 14 - 24 - 8 - 24 - 16
                     spacing: 0
 
                     Text {
@@ -326,22 +357,24 @@ Rectangle {
                         font.family: Theme.fontFamily
                         elide: Text.ElideRight
                         width: parent.width
+                        maximumLineCount: 1
                     }
                     Text {
-                        text: modelData.artist
+                        text: modelData.artist + "  ·  " + (modelData.album || "")
                         color: Theme.textTertiary
                         font.pixelSize: Theme.fontTiny
                         font.family: Theme.fontFamily
                         elide: Text.ElideRight
                         width: parent.width
+                        maximumLineCount: 1
                     }
                 }
 
                 // 播放按钮
                 Rectangle {
-                    width: 20
-                    height: 20
-                    radius: 10
+                    width: 22
+                    height: 22
+                    radius: 11
                     color: playBtnMouse.pressed ? Theme.primaryDark : Theme.primary
                     anchors.verticalCenter: parent.verticalCenter
 
@@ -349,7 +382,7 @@ Rectangle {
                         anchors.centerIn: parent
                         text: "▶"
                         color: "white"
-                        font.pixelSize: 8
+                        font.pixelSize: 7
                     }
 
                     MouseArea {
@@ -366,6 +399,13 @@ Rectangle {
                 onClicked: playlistPage.playSong(modelData)
             }
         }
+    }
+
+    // ── 工具函数 ──
+    function formatCount(n) {
+        if (n >= 100000000) return (n / 100000000).toFixed(1) + "亿"
+        if (n >= 10000) return (n / 10000).toFixed(1) + "万"
+        return n
     }
 
     // ── 加载歌单 ──

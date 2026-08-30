@@ -1,4 +1,4 @@
-pragma Singleton
+﻿pragma Singleton
 import QtQuick 2.12
 
 QtObject {
@@ -99,31 +99,6 @@ QtObject {
         get("/top/list?idx=" + idx, onSuccess, onError)
     }
 
-    // 二维码登录 key
-    function loginQrKey(onSuccess, onError) {
-        get("/login/qr/key", onSuccess, onError)
-    }
-
-    // 二维码登录 生成
-    function loginQrCreate(key, onSuccess, onError) {
-        get("/login/qr/create?key=" + key + "&qrimg=1", onSuccess, onError)
-    }
-
-    // 二维码登录 检查
-    function loginQrCheck(key, onSuccess, onError) {
-        get("/login/qr/check?key=" + key, onSuccess, onError)
-    }
-
-    // 发送验证码
-    function captchaSent(phone, onSuccess, onError) {
-        get("/captcha/sent?phone=" + phone, onSuccess, onError)
-    }
-
-    // 手机验证码登录
-    function loginCellphone(phone, captcha, onSuccess, onError) {
-        get("/login/cellphone?phone=" + phone + "&captcha=" + captcha, onSuccess, onError)
-    }
-
     // 登录状态
     function loginStatus(onSuccess, onError) {
         get("/login/status", onSuccess, onError)
@@ -137,6 +112,69 @@ QtObject {
     // 用户歌单
     function userPlaylist(uid, onSuccess, onError) {
         get("/user/playlist?uid=" + uid, onSuccess, onError)
+    }
+
+    // 用户详情（等级、签名、关注/粉丝）
+    function userDetail(uid, onSuccess, onError) {
+        get("/user/detail?uid=" + uid, onSuccess, onError)
+    }
+
+    // 用户等级
+    function userLevel(onSuccess, onError) {
+        get("/user/level", onSuccess, onError)
+    }
+
+    // 用户订阅统计
+    function userSubcount(onSuccess, onError) {
+        get("/user/subcount", onSuccess, onError)
+    }
+
+    // 私人 FM
+    function personalFM(onSuccess, onError) {
+        get("/personal_fm", onSuccess, onError)
+    }
+
+    // 最近播放
+    function recentSong(limit, onSuccess, onError) {
+        var l = limit || 100
+        get("/record/recent/song?limit=" + l, onSuccess, onError)
+    }
+
+    // 喜欢/取消喜欢
+    function like(id, like, onSuccess, onError) {
+        var l = like === false ? "false" : "true"
+        get("/like?id=" + id + "&like=" + l, onSuccess, onError)
+    }
+
+    // 每日签到（+3经验）
+    function dailySignin(onSuccess, onError) {
+        get("/daily_signin", onSuccess, onError)
+    }
+
+    // 提交听歌记录（+0.5经验/首）
+    function scrobble(id, sourceid, time, onSuccess, onError) {
+        var sid = sourceid || 0
+        var t = time || 0
+        get("/scrobble?id=" + id + "&sourceid=" + sid + "&time=" + t, onSuccess, onError)
+    }
+
+
+    // ── 搜索历史（持久化到本地文件）──
+    function getSearchHistory(onSuccess, onError) {
+        get("/search/history", onSuccess, onError)
+    }
+
+    function addSearchHistory(keyword, onSuccess, onError) {
+        post("/search/history", { keyword: keyword }, onSuccess, onError)
+    }
+
+    function clearSearchHistory(onSuccess, onError) {
+        var xhr = new XMLHttpRequest()
+        xhr.open("DELETE", "http://127.0.0.1:8001/search/history")
+        xhr.onreadystatechange = function() {
+            if (xhr.readyState === 4 && onSuccess) onSuccess(JSON.parse(xhr.responseText || "{}"))
+        }
+        xhr.send()
     }
 
     // 下载

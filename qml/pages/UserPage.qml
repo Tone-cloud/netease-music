@@ -10,11 +10,13 @@ Rectangle {
 
     signal backClicked()
     signal openPlaylist(string id)
-    signal openDownloads()
+    signal openLocal()
     signal openLogin()
     signal logout()
 
     property var userInfo: null
+    property var userDetail: null
+    property var userLevel: null
     property var userPlaylists: []
     property bool loading: false
     readonly property bool isLoggedIn: userPage.userInfo !== null
@@ -182,7 +184,7 @@ Rectangle {
                 // 用户信息卡片
                 Rectangle {
                     width: parent.width
-                    height: 56
+                    height: 82
                     color: Theme.bgCard
                     radius: Theme.radiusLarge
                     border.color: Theme.borderLight
@@ -195,9 +197,9 @@ Rectangle {
 
                         // 真实头像（圆形裁剪）
                         Rectangle {
-                            width: 40
-                            height: 40
-                            radius: 20
+                            width: 44
+                            height: 44
+                            radius: 22
                             clip: true
                             color: Theme.bgTertiary
                             anchors.verticalCenter: parent.verticalCenter
@@ -209,8 +211,8 @@ Rectangle {
                                 fillMode: Image.PreserveAspectCrop
                                 asynchronous: true
                                 cache: true
-                                sourceSize.width: 80
-                                sourceSize.height: 80
+                                sourceSize.width: 88
+                                sourceSize.height: 88
                             }
 
                             // 加载失败时显示首字母
@@ -227,24 +229,79 @@ Rectangle {
 
                         Column {
                             anchors.verticalCenter: parent.verticalCenter
-                            spacing: 2
+                            spacing: 3
+                            width: parent.parent.width - 60
 
-                            Text {
-                                text: userPage.userInfo ? userPage.userInfo.nickname : ""
-                                color: Theme.textPrimary
-                                font.pixelSize: Theme.fontNormal
-                                font.bold: true
-                                font.family: Theme.fontFamily
-                                elide: Text.ElideRight
-                                width: parent.parent.width - 60
+                            // 昵称 + 等级
+                            Row {
+                                width: parent.width
+                                spacing: 6
+
+                                Text {
+                                    text: userPage.userInfo ? userPage.userInfo.nickname : ""
+                                    color: Theme.textPrimary
+                                    font.pixelSize: Theme.fontNormal
+                                    font.bold: true
+                                    font.family: Theme.fontFamily
+                                    elide: Text.ElideRight
+                                    maximumLineCount: 1
+                                }
+
+                                // 等级标签
+                                Rectangle {
+                                    visible: userPage.userLevel && userPage.userLevel.level
+                                    width: levelText.width + 10
+                                    height: 14
+                                    radius: 7
+                                    color: Theme.withAlpha(Theme.primary, 0.15)
+                                    anchors.verticalCenter: parent.verticalCenter
+
+                                    Text {
+                                        id: levelText
+                                        anchors.centerIn: parent
+                                        text: "Lv." + (userPage.userLevel ? userPage.userLevel.level : 0)
+                                        color: Theme.primary
+                                        font.pixelSize: Theme.fontTiny
+                                        font.family: Theme.fontFamily
+                                        font.bold: true
+                                    }
+                                }
                             }
 
+                            // 签名
                             Text {
-                                visible: userPage.userInfo && userPage.userInfo.level && userPage.userInfo.level !== "?"
-                                text: userPage.userInfo ? ("Lv." + userPage.userInfo.level) : ""
-                                color: Theme.textTertiary
+                                text: userPage.userDetail && userPage.userDetail.profile ? (userPage.userDetail.profile.signature || "这个人很懒，什么都没写") : "加载中..."
+                                color: Theme.textSecondary
                                 font.pixelSize: Theme.fontTiny
                                 font.family: Theme.fontFamily
+                                elide: Text.ElideRight
+                                width: parent.width
+                                maximumLineCount: 1
+                            }
+
+                            // 关注/粉丝/听歌次数
+                            Row {
+                                width: parent.width
+                                spacing: 10
+
+                                Text {
+                                    text: "关注 " + (userPage.userDetail && userPage.userDetail.profile ? userPage.userDetail.profile.follows : 0)
+                                    color: Theme.textTertiary
+                                    font.pixelSize: Theme.fontTiny
+                                    font.family: Theme.fontFamily
+                                }
+                                Text {
+                                    text: "粉丝 " + (userPage.userDetail && userPage.userDetail.profile ? userPage.userDetail.profile.followeds : 0)
+                                    color: Theme.textTertiary
+                                    font.pixelSize: Theme.fontTiny
+                                    font.family: Theme.fontFamily
+                                }
+                                Text {
+                                    text: "听歌 " + (userPage.userLevel && userPage.userLevel.listenSongs ? userPage.userLevel.listenSongs : 0) + "首"
+                                    color: Theme.textTertiary
+                                    font.pixelSize: Theme.fontTiny
+                                    font.family: Theme.fontFamily
+                                }
                             }
                         }
                     }
@@ -254,7 +311,7 @@ Rectangle {
                 Repeater {
                     model: [
                         { label: "我的歌单", action: "playlists", icon: "📋" },
-                        { label: "下载管理", action: "downloads", icon: "⬇" },
+                        { label: "本地音乐", action: "local", icon: "🎵" },
                         { label: "退出登录", action: "logout", icon: "↩" }
                     ]
 
@@ -306,7 +363,7 @@ Rectangle {
                             id: funcMouse
                             anchors.fill: parent
                             onClicked: {
-                                if (modelData.action === "downloads") userPage.openDownloads()
+                                if (modelData.action === "local") userPage.openLocal()
                                 else if (modelData.action === "logout") userPage.logout()
                                 else if (modelData.action === "playlists") loadUserPlaylists()
                             }
@@ -406,5 +463,27 @@ Rectangle {
         }, function(e) { userPage.loading = false })
     }
 
-    Component.onCompleted: if (userPage.userInfo) loadUserPlaylists()
+    function loadUserDetail() {
+        if (!userPage.userInfo || !userPage.userInfo.userId) return
+        var uid = userPage.userInfo.userId
+        // 加载用户详情
+        ApiClient.userDetail(uid, function(d) {
+            if (d.code === 200) {
+                userPage.userDetail = d
+            }
+        }, function(e) { console.log("[user] detail error:", e) })
+        // 加载用户等级
+        ApiClient.userLevel(function(d) {
+            if (d.code === 200 && d.data) {
+                userPage.userLevel = d.data
+            }
+        }, function(e) { console.log("[user] level error:", e) })
+    }
+
+    Component.onCompleted: {
+        if (userPage.userInfo) {
+            loadUserPlaylists()
+            loadUserDetail()
+        }
+    }
 }
