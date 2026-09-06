@@ -3,13 +3,10 @@
 import (
 	"crypto/md5"
 	"crypto/rand"
-	"embed"
 	"encoding/json"
 	"fmt"
 	"io"
-	"io/fs"
 	"math/big"
-	"net"
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
@@ -19,11 +16,8 @@ import (
 	"sync"
 	"time"
 
-	utls "github.com/refraction-networking/utls"
 )
 
-//go:embed web/*
-var webFS embed.FS
 
 var (
 	client    *http.Client
@@ -163,62 +157,18 @@ func cancelBatchDownload() {
 	batchMu.Unlock()
 }
 
-// utlsDial 使用 utls 模拟 Chrome 的 TLS 指纹（ClientHello），绕过网易云风控
-// 手动修改 ALPN 扩展，只保留 http/1.1，避免 HTTP/2 帧解析错误
-func utlsDial(network, addr string) (net.Conn, error) {
-	conn, err := net.Dial(network, addr)
-	if err != nil {
-		return nil, err
-	}
-	host := addr
-	if idx := strings.Index(addr, ":"); idx >= 0 {
-		host = addr[:idx]
-	}
-	config := utls.Config{
-		ServerName: host,
-	}
-	uConn := utls.UClient(conn, &config, utls.HelloChrome_120)
-	// 构建握手状态，手动修改 ALPN 扩展，只保留 http/1.1
-	if err := uConn.BuildHandshakeState(); err != nil {
-		conn.Close()
-		return nil, err
-	}
-	for _, ext := range uConn.Extensions {
-		if alpn, ok := ext.(*utls.ALPNExtension); ok {
-			alpn.AlpnProtocols = []string{"http/1.1"}
-			fmt.Printf("[utls] 已修改 ALPN 扩展为 http/1.1\n")
-			break
-		}
-	}
-	if err := uConn.Handshake(); err != nil {
-		conn.Close()
-		return nil, err
-	}
-	state := uConn.ConnectionState()
-	fmt.Printf("[utls] 握手成功 host=%s version=%x negotiated=%s\n", host, state.Version, state.NegotiatedProtocol)
-	return uConn, nil
-}
-
 func init() {
 	cookieJar, _ = cookiejar.New(nil)
-	// 配置 Transport，使用 utls 模拟 Chrome 的 TLS 指纹
-	transport := &http.Transport{
-		DialTLS:             utlsDial,
-		MaxIdleConns:        100,
-		IdleConnTimeout:     90 * time.Second,
-		TLSHandshakeTimeout: 10 * time.Second,
-		ExpectContinueTimeout: 1 * time.Second,
-	}
+	// 使用标准 http.Client（API 调用无需伪造 TLS 指纹）
 	client = &http.Client{
-		Jar:       cookieJar,
-		Transport: transport,
-		Timeout:   30 * time.Second,
+		Jar:     cookieJar,
+		Timeout: 30 * time.Second,
 	}
 	os.MkdirAll(cacheDir, 0755)
 	os.MkdirAll(musicDir, 0755)
 	// 异步清理超过 7 天的缓存文件
 	go cleanOldCache()
-	// 读取 cookies.json（用户从网页端登录获取的 cookies，减少风控）
+	// 读取 cookies.json（登录状态）
 	loadCookiesFromFile()
 }
 
@@ -289,15 +239,13 @@ func main() {
 	go initCookies()
 
 	fmt.Println("NeteaseMusic server listening on", listenAddr)
-	// 启动 web 短信登录服务（浏览器访问，减少风控）
-	go startWebLoginServer()
 	http.ListenAndServe(listenAddr, nil)
 }
 
-// 初始化 cookie：先调用匿名登录接口获取 NMTID/__csrf 等 cookie，减少风控
+// 初始化 cookie：获取 NMTID/__csrf 等必需 cookie
 func initCookies() {
-	// 手动设置网易云网页端必需的 cookie（SPA 页面通过 JS 设置，Go 客户端拿不到，自己生成）
-	// 这些 cookie 服务器只用于风控/防 CSRF，不验证有效性
+	// 设置必需的 cookie
+	// 这些 cookie 是 weapi 接口必需的
 	u, _ := url.Parse("https://music.163.com")
 	csrfToken := randomHex(32)
 	nmtid := randomString(22)
@@ -337,156 +285,9 @@ func randomHex(n int) string {
 }
 
 // web cookies 导入服务（监听 8667，浏览器访问）
-func startWebLoginServer() {
-	mux := http.NewServeMux()
-	// 静态文件
-	sub, _ := fs.Sub(webFS, "web")
-	mux.Handle("/", http.FileServer(http.FS(sub)))
-	// API
-	mux.HandleFunc("/api/import", handleImportCookies)
-	mux.HandleFunc("/pull", handleWebPull)
-	addr := "0.0.0.0:8667"
-	fmt.Println("[web-login] 登录服务监听于 http://" + addr + "/verify.html")
-	http.ListenAndServe(addr, mux)
-}
 
 // 导入 cookies（支持 JSON 格式和字符串格式）
-func handleImportCookies(w http.ResponseWriter, r *http.Request) {
-	if r.Method != "POST" {
-		writeError(w, "需要 POST")
-		return
-	}
-	body, _ := io.ReadAll(r.Body)
-	cookieStr := strings.TrimSpace(string(body))
-	if cookieStr == "" {
-		// 尝试从表单获取
-		cookieStr = r.FormValue("cookies")
-	}
-	if cookieStr == "" {
-		writeError(w, "cookies 为空")
-		return
-	}
 
-	u, _ := url.Parse("https://music.163.com")
-	count := 0
-
-	// 尝试 JSON 格式：[{"name":"xxx","value":"yyy"},...] 或 {"xxx":"yyy",...}
-	if strings.HasPrefix(cookieStr, "[") || strings.HasPrefix(cookieStr, "{") {
-		// 数组格式
-		var arr []struct {
-			Name  string `json:"name"`
-			Value string `json:"value"`
-		}
-		if err := json.Unmarshal([]byte(cookieStr), &arr); err == nil {
-			for _, c := range arr {
-				if c.Name != "" {
-					cookieJar.SetCookies(u, []*http.Cookie{{Name: c.Name, Value: c.Value, Path: "/", Domain: ".music.163.com"}})
-					count++
-				}
-			}
-		} else {
-			// map 格式
-			var m map[string]string
-			if err := json.Unmarshal([]byte(cookieStr), &m); err == nil {
-				for name, value := range m {
-					cookieJar.SetCookies(u, []*http.Cookie{{Name: name, Value: value, Path: "/", Domain: ".music.163.com"}})
-					count++
-				}
-			}
-		}
-	} else {
-		// 字符串格式：name=value; name=value; ...
-		pairs := strings.Split(cookieStr, ";")
-		for _, pair := range pairs {
-			pair = strings.TrimSpace(pair)
-			if pair == "" {
-				continue
-			}
-			idx := strings.Index(pair, "=")
-			if idx > 0 {
-				name := strings.TrimSpace(pair[:idx])
-				value := strings.TrimSpace(pair[idx+1:])
-				if name != "" {
-					cookieJar.SetCookies(u, []*http.Cookie{{Name: name, Value: value, Path: "/", Domain: ".music.163.com"}})
-					count++
-				}
-			}
-		}
-	}
-
-	if count == 0 {
-		writeError(w, "未能解析任何 cookies")
-		return
-	}
-
-	// 自动补全必需的 cookies（__csrf、NMTID、os）
-	existing := make(map[string]bool)
-	for _, c := range cookieJar.Cookies(u) {
-		existing[c.Name] = true
-	}
-	var extraCookies []*http.Cookie
-	if !existing["__csrf"] {
-		extraCookies = append(extraCookies, &http.Cookie{Name: "__csrf", Value: randomHex(32), Path: "/", Domain: ".music.163.com"})
-	}
-	if !existing["NMTID"] {
-		extraCookies = append(extraCookies, &http.Cookie{Name: "NMTID", Value: randomString(22), Path: "/", Domain: ".music.163.com"})
-	}
-	if !existing["os"] {
-		extraCookies = append(extraCookies, &http.Cookie{Name: "os", Value: "pc", Path: "/", Domain: ".music.163.com"})
-	}
-	if len(extraCookies) > 0 {
-		cookieJar.SetCookies(u, extraCookies)
-		count += len(extraCookies)
-		fmt.Printf("[web-login] 自动补全 %d 个 cookies\n", len(extraCookies))
-	}
-
-	// 保存到文件
-	saveCookiesToFile()
-	fmt.Printf("[web-login] 导入 %d 个 cookies，已保存\n", count)
-
-	// 验证登录状态
-	data, err := weapiPost("/weapi/w/nuser/account/get", "{}")
-	loggedIn := false
-	nickname := ""
-	if err == nil {
-		var resp struct {
-			Code int `json:"code"`
-			Profile struct {
-				Nickname string `json:"nickname"`
-			} `json:"profile"`
-		}
-		if json.Unmarshal(data, &resp) == nil && resp.Code == 200 && resp.Profile.Nickname != "" {
-			loggedIn = true
-			nickname = resp.Profile.Nickname
-		}
-	}
-
-	writeJSON(w, map[string]interface{}{
-		"code":     200,
-		"count":    count,
-		"loggedIn": loggedIn,
-		"nickname": nickname,
-		"message":  func() string {
-			if loggedIn {
-				return "导入成功！已登录为：" + nickname
-			}
-			return "已导入 " + fmt.Sprintf("%d", count) + " 个 cookies，但未检测到登录状态，请确认 cookies 包含 MUSIC_U"
-		}(),
-	})
-}
-
-func handleWebPull(w http.ResponseWriter, r *http.Request) {
-	u, _ := url.Parse("https://music.163.com")
-	cookies := cookieJar.Cookies(u)
-	cookieMap := make(map[string]string)
-	for _, c := range cookies {
-		cookieMap[c.Name] = c.Value
-	}
-	writeJSON(w, map[string]interface{}{
-		"code":    200,
-		"cookies": cookieMap,
-	})
-}
 
 // ── 工具函数 ──
 
@@ -1087,7 +888,7 @@ func handleLocalDelete(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]interface{}{"code": 200, "msg": "已删除"})
 }
 
-// 下载文件（用带 utls 的 client，模拟浏览器 TLS 指纹）
+// 下载文件
 func downloadFile(url, dest string) error {
 	os.MkdirAll(filepath.Dir(dest), 0755)
 	req, err := http.NewRequest("GET", url, nil)
@@ -1191,7 +992,7 @@ func handleSearchHistory(w http.ResponseWriter, r *http.Request) {
 }
 
 // 音频流代理：C++ 播放器从本地 127.0.0.1:8001/audio?url=xxx 读取，Go 转发到网易云 CDN
-// 解决 FFmpeg 直接访问 CDN 失败的问题（User-Agent/Referer/TLS指纹等）
+// 音频流代理
 func handleAudioProxy(w http.ResponseWriter, r *http.Request) {
 	audioUrl := r.URL.Query().Get("url")
 	if audioUrl == "" {
@@ -1205,7 +1006,7 @@ func handleAudioProxy(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "create request failed: "+err.Error(), 500)
 		return
 	}
-	// 模拟浏览器请求头，绕过 CDN 风控
+	// 设置请求头
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
 	req.Header.Set("Referer", "https://music.163.com/")
 	req.Header.Set("Accept", "*/*")
