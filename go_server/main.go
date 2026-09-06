@@ -36,7 +36,7 @@ const (
 
 // ── 批量下载管理器 ──
 type BatchTask struct {
-	ID     string `json:"id"`
+	ID     int64  `json:"id"`
 	Name   string `json:"name"`
 	Artist string `json:"artist"`
 }
@@ -115,10 +115,10 @@ func startBatchDownload(tasks []BatchTask) {
 	}()
 }
 
-func downloadSong(id, name, artist string) error {
+func downloadSong(id int64, name, artist string) error {
 	safeName := sanitizeFilename(name)
 	if safeName == "" {
-		safeName = id
+		safeName = fmt.Sprintf("%d", id)
 	}
 	dlFile := filepath.Join(musicDir, safeName+".mp3")
 	// 检查是否已下载
@@ -126,7 +126,7 @@ func downloadSong(id, name, artist string) error {
 		return fmt.Errorf("已存在")
 	}
 	// 获取地址
-	body := fmt.Sprintf(`{"ids":"[%s]","level":"standard","encodeType":"mp3"}`, id)
+	body := fmt.Sprintf(`{"ids":"[%d]","level":"standard","encodeType":"mp3"}`, id)
 	data, err := weapiPost("/weapi/song/enhance/player/url/v1", body)
 	if err != nil {
 		return err
@@ -404,7 +404,7 @@ func handleSongUrl(w http.ResponseWriter, r *http.Request) {
 		writeError(w, "缺少 id")
 		return
 	}
-	body := fmt.Sprintf(`{"ids":"[%s]","level":"standard","encodeType":"mp3"}`, id)
+	body := fmt.Sprintf(`{"ids":"[%d]","level":"standard","encodeType":"mp3"}`, id)
 	data, err := weapiPost("/weapi/song/enhance/player/url/v1", body)
 	if err != nil {
 		writeError(w, err.Error())
@@ -699,7 +699,7 @@ func handleCache(w http.ResponseWriter, r *http.Request) {
 
 	// 如果是 ID 模式，先获取播放地址
 	if songUrl == "" {
-		body := fmt.Sprintf(`{"ids":"[%s]","level":"standard","encodeType":"mp3"}`, id)
+		body := fmt.Sprintf(`{"ids":"[%d]","level":"standard","encodeType":"mp3"}`, id)
 		data, err := weapiPost("/weapi/song/enhance/player/url/v1", body)
 		if err != nil {
 			writeError(w, err.Error())
@@ -748,7 +748,7 @@ func handleDownload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// 获取地址并下载
-	body := fmt.Sprintf(`{"ids":"[%s]","level":"standard","encodeType":"mp3"}`, id)
+	body := fmt.Sprintf(`{"ids":"[%d]","level":"standard","encodeType":"mp3"}`, id)
 	data, err := weapiPost("/weapi/song/enhance/player/url/v1", body)
 	if err != nil {
 		writeError(w, err.Error())

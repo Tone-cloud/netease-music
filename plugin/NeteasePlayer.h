@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 #include <QObject>
 #include <QString>
 #include <QByteArray>
@@ -108,6 +108,7 @@ private slots:
     void onAudioStateChanged(QAudio::State state);
     void updatePositionTick();
     void onCacheReply();
+    void checkSystemPlayerState();  // 轮询系统播放器状态，检测播放完成
 
 private:
     void initAudioOutput();
@@ -122,6 +123,8 @@ private:
     QTimer *m_positionTimer = nullptr;
     QNetworkAccessManager *m_networkManager = nullptr;
     QNetworkReply *m_cacheReply = nullptr;
+    QTimer *m_systemPlayerTimer = nullptr;  // 系统播放器状态轮询
+    bool m_usingSystemPlayer = false;       // 是否使用系统播放器
 
     QString m_source;
     QString m_errorString;

@@ -209,8 +209,10 @@ Rectangle {
             anchors.fill: parent
             sourceComponent: Component {
                 Pages.PlayerPage {
-            player: root.globalPlayer
+                    player: root.globalPlayer
                     currentSong: root.currentSong
+                    playlist: root.playlist
+                    currentIndex: root.currentIndex
                     onBackClicked: root.goBack()
                     onPrevSong: root.playPrev()
                     onNextSong: root.playNext()

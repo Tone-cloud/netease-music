@@ -378,6 +378,8 @@ void NeteasePlayer::togglePause() {
 }
 
 void NeteasePlayer::stop() {
+    if (m_systemPlayerTimer) m_systemPlayerTimer->stop();
+    m_usingSystemPlayer = false;
     m_positionTimer->stop();
     if (m_decoder) {
         m_decoder->stop();
@@ -635,4 +637,40 @@ void NeteasePlayer::playWithSystemPlayer(const QString &filePath) {
     emit sourceChanged(filePath);
     setPlaying(true);
     qDebug() << "[NeteasePlayer] DONE: system player playback started";
+}
+    m_usingSystemPlayer = true;
+
+    // 启动定时器轮询系统播放器状态，检测播放完成
+    if (!m_systemPlayerTimer) {
+        m_systemPlayerTimer = new QTimer(this);
+        connect(m_systemPlayerTimer, &QTimer::timeout, this, &NeteasePlayer::checkSystemPlayerState);
+    }
+    m_systemPlayerTimer->start(2000);  // 每2秒检查一次
+    qDebug() << "[NeteasePlayer] DONE: system player playback started, monitoring...";
+}
+
+// 轮询系统播放器状态，检测播放完成
+void NeteasePlayer::checkSystemPlayerState() {
+    if (!m_usingSystemPlayer || !m_playing) return;
+
+    typedef int (*PlayStateFunc)(void*);
+    PlayStateFunc playState = (PlayStateFunc)resolveSymbol("_ZNK19YMediaPlayerManager9playStateEv");
+    typedef void* (*InstanceFunc)();
+    InstanceFunc mpmInstance = (InstanceFunc)resolveSymbol("_ZN10YSingletonI19YMediaPlayerManagerE8instanceEv");
+
+    if (!mpmInstance || !playState) return;
+
+    void* mpm = mpmInstance();
+    if (!mpm) return;
+
+    int state = playState(mpm);
+    // PlayState: 0=STOPPED, 1=PAUSED, 2=PLAYING
+    if (state != 2 && m_playing) {
+        qDebug() << "[NeteasePlayer] system player finished, state=" << state;
+        m_systemPlayerTimer->stop();
+        m_usingSystemPlayer = false;
+        setPlaying(false);
+        setPaused(false);
+        emit finished();
+    }
 }

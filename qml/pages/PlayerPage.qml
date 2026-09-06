@@ -1,4 +1,4 @@
-import QtQuick 2.12
+﻿import QtQuick 2.12
 import NeteasePlayer 1.0
 import "../components"
 
@@ -22,6 +22,8 @@ Rectangle {
     // ── 属性 ──
     property NeteasePlayer player: null
     property var currentSong: null
+    property var playlist: []       // 播放列表
+    property int currentIndex: 0    // 当前播放索引
     property string lyricText: ""
     property var lyricLines: []
     property int lyricIndex: -1
@@ -258,14 +260,23 @@ Rectangle {
                 }
             }
 
-            // 标题
-            Text {
+            // 标题 + 播放进度
+            Column {
                 anchors.verticalCenter: parent.verticalCenter
-                text: "正在播放"
-                color: Theme.textPrimary
-                font.pixelSize: Theme.fontNormal
-                font.bold: true
-                font.family: Theme.fontFamily
+                spacing: 0
+                Text {
+                    text: "正在播放"
+                    color: Theme.textPrimary
+                    font.pixelSize: Theme.fontNormal
+                    font.bold: true
+                    font.family: Theme.fontFamily
+                }
+                Text {
+                    text: playerPage.playlist.length > 1 ? ("第 " + (playerPage.currentIndex + 1) + " / " + playerPage.playlist.length + " 首") : ""
+                    color: Theme.textTertiary
+                    font.pixelSize: Theme.fontTiny
+                    font.family: Theme.fontFamily
+                }
             }
 
             Item { width: 1 }
