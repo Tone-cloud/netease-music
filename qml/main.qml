@@ -15,7 +15,7 @@ Rectangle {
     // ── 常量 ──
     property string pluginDir: "/userdisk/PenMods/plugins/com.netease.music"
     property string serverBin: pluginDir + "/server"
-    property string serverUrl: "http://127.0.0.1:8001"
+    property string serverUrl: "http://127.0.0.1:8002"
 
     // ── 全局播放器 ──
     NeteasePlayer {

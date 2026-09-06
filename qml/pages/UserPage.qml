@@ -1,4 +1,4 @@
-import QtQuick 2.12
+﻿import QtQuick 2.12
 import "../components"
 
 Rectangle {
@@ -142,7 +142,7 @@ Rectangle {
                         spacing: 4
 
                         Text {
-                            text: "浏览器访问以下地址登录："
+                            text: "电脑浏览器访问以下地址登录："
                             color: Theme.textSecondary
                             font.pixelSize: Theme.fontTiny
                             font.family: Theme.fontFamily
@@ -158,7 +158,7 @@ Rectangle {
                                 anchors.verticalCenter: parent.verticalCenter
                                 anchors.left: parent.left
                                 anchors.leftMargin: 6
-                                text: "http://词典笔IP:8667/verify.html"
+                                text: "http://词典笔IP:8002/login"
                                 color: Theme.primary
                                 font.pixelSize: Theme.fontTiny
                                 font.family: Theme.fontFamily
@@ -166,7 +166,7 @@ Rectangle {
                         }
 
                         Text {
-                            text: "支持 Cookies 导入，登录成功后自动保存。"
+                            text: "只需复制粘贴 MUSIC_U，无需手机验证"
                             color: Theme.textTertiary
                             font.pixelSize: Theme.fontTiny
                             font.family: Theme.fontFamily

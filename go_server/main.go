@@ -26,7 +26,7 @@ var (
 )
 
 const (
-	listenAddr = "127.0.0.1:8001"
+	listenAddr = "127.0.0.1:8002"
 	baseAPI    = "https://music.163.com"
 	musicDir   = "/userdisk/Music/netease"
 	cacheDir   = "/userdisk/Music/netease/cache"
@@ -213,7 +213,9 @@ func main() {
 	http.HandleFunc("/recommend/songs", handleDailyRecommend)
 	http.HandleFunc("/toplist", handleToplist)
 	http.HandleFunc("/top/list", handleTopListDetail)
+	http.HandleFunc("/login", handleLoginPage)
 	http.HandleFunc("/login/status", handleLoginStatus)
+	http.HandleFunc("/cookies/import", handleImportCookies)
 	http.HandleFunc("/logout", handleLogout)
 	http.HandleFunc("/user/playlist", handleUserPlaylist)
 	http.HandleFunc("/user/detail", handleUserDetail)
@@ -506,6 +508,62 @@ func saveCookiesToFile() {
 	}
 	data, _ := json.MarshalIndent(cookieMap, "", "  ")
 	os.WriteFile(cookiePath, data, 0644)
+}
+
+// 极简登录页（只需要粘贴 MUSIC_U）
+func handleLoginPage(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Write([]byte(`<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>网易云登录</title>
+<style>body{font-family:sans-serif;max-width:500px;margin:40px auto;padding:20px}
+h1{font-size:20px;color:#c20c0c}.tip{color:#666;font-size:14px;line-height:1.8;margin:15px 0}
+textarea{width:100%;height:80px;padding:10px;box-sizing:border-box;border:1px solid #ddd;border-radius:4px;font-family:monospace;font-size:13px}
+button{padding:10px 30px;background:#c20c0c;color:white;border:none;border-radius:4px;cursor:pointer;font-size:15px}
+button:hover{background:#a00a0a}#result{margin-top:15px;font-weight:bold}</style></head>
+<body><h1>网易云音乐登录</h1>
+<div class="tip">1. 电脑浏览器打开 <b>music.163.com</b> 并登录<br>
+2. 按 <b>F12</b> → Application(应用) → Cookies → 找到 <b>MUSIC_U</b><br>
+3. 复制 MUSIC_U 的值，粘贴到下面，点击导入</div>
+<textarea id="musicU" placeholder="粘贴 MUSIC_U 的值（一长串字符）"></textarea>
+<br><br><button onclick="doImport()">导入登录</button>
+<p id="result"></p>
+<script>function doImport(){var v=document.getElementById("musicU").value.trim();
+if(!v){alert("请输入 MUSIC_U");return}
+fetch("/cookies/import",{method:"POST",headers:{"Content-Type":"application/json"},
+body:JSON.stringify({MUSIC_U:v})}).then(r=>r.json()).then(d=>{
+if(d.code===200){document.getElementById("result").innerHTML='<span style="color:green">登录成功！可以关闭此页面，回到词典笔查看</span>'}
+else{document.getElementById("result").innerHTML='<span style="color:red">失败: "+(d.msg||"未知错误")+"</span>'}
+}).catch(e=>{document.getElementById("result").innerHTML='<span style="color:red">请求失败: "+e+"</span>'})}</script>
+</body></html>`))
+}
+
+// 导入 cookies（只需要 MUSIC_U）
+func handleImportCookies(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		writeError(w, "需要 POST 请求")
+		return
+	}
+	var req map[string]string
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, "JSON 解析失败")
+		return
+	}
+	musicU, ok := req["MUSIC_U"]
+	if !ok || musicU == "" {
+		writeError(w, "MUSIC_U 不能为空")
+		return
+	}
+	// 设置 MUSIC_U cookie
+	u, _ := url.Parse("https://music.163.com")
+	cookieJar.SetCookies(u, []*http.Cookie{
+		{Name: "MUSIC_U", Value: musicU, Domain: ".music.163.com", Path: "/"},
+	})
+	// 访问首页获取 __csrf 和 NMTID（网易云需要这些）
+	client.Get("https://music.163.com")
+	// 保存到文件
+	saveCookiesToFile()
+	fmt.Printf("[cookies] 导入 MUSIC_U 成功，已保存到 cookies.json\n")
+	writeJSON(w, map[string]interface{}{"code": 200, "msg": "登录成功"})
 }
 
 func handleLoginStatus(w http.ResponseWriter, r *http.Request) {
@@ -991,7 +1049,7 @@ func handleSearchHistory(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// 音频流代理：C++ 播放器从本地 127.0.0.1:8001/audio?url=xxx 读取，Go 转发到网易云 CDN
+// 音频流代理：C++ 播放器从本地 127.0.0.1:8002/audio?url=xxx 读取，Go 转发到网易云 CDN
 // 音频流代理
 func handleAudioProxy(w http.ResponseWriter, r *http.Request) {
 	audioUrl := r.URL.Query().Get("url")

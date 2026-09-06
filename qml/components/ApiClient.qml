@@ -4,7 +4,7 @@ import QtQuick 2.12
 QtObject {
     id: apiClient
 
-    property string baseUrl: "http://127.0.0.1:8001"
+    property string baseUrl: "http://127.0.0.1:8002"
 
     // 通用 GET 请求
     function get(path, onSuccess, onError) {
@@ -170,7 +170,7 @@ QtObject {
 
     function clearSearchHistory(onSuccess, onError) {
         var xhr = new XMLHttpRequest()
-        xhr.open("DELETE", "http://127.0.0.1:8001/search/history")
+        xhr.open("DELETE", "http://127.0.0.1:8002/search/history")
         xhr.onreadystatechange = function() {
             if (xhr.readyState === 4 && onSuccess) onSuccess(JSON.parse(xhr.responseText || "{}"))
         }
