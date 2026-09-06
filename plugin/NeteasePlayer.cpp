@@ -636,8 +636,6 @@ void NeteasePlayer::playWithSystemPlayer(const QString &filePath) {
     m_source = filePath;
     emit sourceChanged(filePath);
     setPlaying(true);
-    qDebug() << "[NeteasePlayer] DONE: system player playback started";
-}
     m_usingSystemPlayer = true;
 
     // 启动定时器轮询系统播放器状态，检测播放完成
