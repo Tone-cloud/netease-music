@@ -343,7 +343,9 @@ Rectangle {
                         id: s.id,
                         name: s.name,
                         artist: s.artists && s.artists.length > 0 ? s.artists[0].name : "",
-                        coverImgUrl: s.album ? s.album.picUrl : ""
+                        album: s.album ? s.album.name : "",
+                        duration: s.duration || 0,
+                        cover: s.album ? s.album.picUrl : ""
                     })
                 }
                 console.log("[fm] 加载到", songs.length, "首歌")
