@@ -169,7 +169,7 @@ Rectangle {
                         var id = root.playlistId
                         if (!id) return
                         if (id === "daily") {
-                            item.load("daily")
+                            if (item) item.load("daily")
                         } else if (id.indexOf("top_") === 0) {
                             ApiClient.topListDetail(root.playlistIdx, function(d) {
                                 if (d.code === 200 && d.playlist) {

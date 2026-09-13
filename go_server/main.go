@@ -240,6 +240,9 @@ func main() {
 	// 异步初始化 cookie（避免阻塞 server 启动导致插件连接超时）
 	go initCookies()
 
+	// 启动独立的登录服务（监听 0.0.0.0:8667，允许外部浏览器访问）
+	go startLoginServer()
+
 	fmt.Println("NeteaseMusic server listening on", listenAddr)
 	http.ListenAndServe(listenAddr, nil)
 }
@@ -406,7 +409,7 @@ func handleSongUrl(w http.ResponseWriter, r *http.Request) {
 		writeError(w, "缺少 id")
 		return
 	}
-	body := fmt.Sprintf(`{"ids":"[%d]","level":"standard","encodeType":"mp3"}`, id)
+	body := fmt.Sprintf(`{"ids":"[%s]","level":"standard","encodeType":"mp3"}`, id)
 	data, err := weapiPost("/weapi/song/enhance/player/url/v1", body)
 	if err != nil {
 		writeError(w, err.Error())
@@ -1099,4 +1102,15 @@ func handleAudioProxy(w http.ResponseWriter, r *http.Request) {
 	} else {
 		fmt.Printf("[audio-proxy] done, %d bytes\n", written)
 	}
+}
+
+// 独立登录服务：监听 0.0.0.0:8667，只提供登录页和 cookies 导入
+// 主 server 保持 127.0.0.1 更安全，登录服务单独暴露给外部浏览器
+func startLoginServer() {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/login", handleLoginPage)
+	mux.HandleFunc("/", handleLoginPage)
+	mux.HandleFunc("/cookies/import", handleImportCookies)
+	fmt.Println("[web-login] 登录服务监听于 http://0.0.0.0:8667/login")
+	http.ListenAndServe("0.0.0.0:8667", mux)
 }

@@ -498,11 +498,10 @@ void NeteasePlayer::startServer(const QString &path) {
     if (path.isEmpty()) return;
     // 先杀掉旧进程
     QProcess::execute("pkill", QStringList() << "-f" << path);
-    // 确保有执行权限
-    QProcess::execute("chmod", QStringList() << "+x" << path);
-    // 火忘式启动
-    QProcess::startDetached(path, QStringList());
-    qInfo() << "Started server:" << path;
+    // 确保有执行权限，然后启动（用 sh -c 确保 chmod 成功后再启动）
+    QString cmd = QString("chmod +x \\"%1\\" && \\"%1\\"").arg(path);
+    bool ok = QProcess::startDetached("sh", QStringList() << "-c" << cmd);
+    qInfo() << "Started server:" << path << "success:" << ok;
 }
 
 void NeteasePlayer::execDetached(const QString &cmd) {
