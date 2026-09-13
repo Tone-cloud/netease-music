@@ -178,7 +178,7 @@ Rectangle {
                                 }
                             }, null)
                         } else {
-                            item.load(id)
+if (item) item.load(id)
                         }
                     }
                     onLoaded: function(item) {

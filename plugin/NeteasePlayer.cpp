@@ -269,7 +269,7 @@ void NeteasePlayer::play(const QString &source) {
     if (source.startsWith("http://") || source.startsWith("https://")) {
         QUrl qurl(source);
         QByteArray encoded = qurl.toEncoded(QUrl::FullyEncoded);
-        QString cacheUrl = QString("http://127.0.0.1:8001/cache?url=%1").arg(QString::fromUtf8(encoded));
+        QString cacheUrl = QString("http://127.0.0.1:8002/cache?url=%1").arg(QString::fromUtf8(encoded));
         qDebug() << "[NeteasePlayer] requesting cache:" << cacheUrl;
 
         QUrl reqUrl(cacheUrl);
