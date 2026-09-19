@@ -9,25 +9,29 @@ Rectangle {
     color: Theme.bgPrimary
 
     signal backClicked()
-    signal openPlaylist(var id)
+    signal openPlaylist(var id, int index)
     signal loaded(var item)
 
-    property var toplists: [
-        { name: "飙升榜", id: "19723756", desc: "近期热度飙升最快" },
-        { name: "热歌榜", id: "3778678", desc: "网易云最热歌曲" },
-        { name: "新歌榜", id: "3779629", desc: "最新发布歌曲" },
-        { name: "原创榜", id: "2884035", desc: "原创音乐人作品" },
-        { name: "欧美榜", id: "2809513734", desc: "欧美热门歌曲" },
-        { name: "ACG榜", id: "71382140", desc: "动漫游戏音乐" },
-        { name: "民谣榜", id: "5059633732", desc: "民谣音乐榜单" },
-        { name: "电音榜", id: "10520166", desc: "电子音乐榜单" },
-        { name: "说唱榜", id: "991319590", desc: "说唱音乐榜单" },
-        { name: "摇滚榜", id: "5059642708", desc: "摇滚音乐榜单" },
-        { name: "古典榜", id: "71385702", desc: "古典音乐榜单" },
-        { name: "韩语榜", id: "745621467", desc: "韩语热门歌曲" }
-    ]
+    property var toplists: []
+    property bool loading: true
 
-    Component.onCompleted: toplistPage.loaded(toplistPage)
+    Component.onCompleted: {
+        ApiClient.toplist(function(d) {
+            var list = []
+            if (d.code === 200 && d.list) {
+                for (var i = 0; i < d.list.length; i++) {
+                    var item = d.list[i]
+                    list.push({ name: item.name, id: item.id, desc: item.updateFrequency || "网易云音乐官方榜单" })
+                }
+            }
+            toplistPage.toplists = list
+            toplistPage.loading = false
+            toplistPage.loaded(toplistPage)
+        }, function() {
+            toplistPage.loading = false
+            toplistPage.loaded(toplistPage)
+        })
+    }
 
     // 顶部栏
     Rectangle {
@@ -158,7 +162,7 @@ Rectangle {
             MouseArea {
                 id: itemMouse
                 anchors.fill: parent
-                onClicked: toplistPage.openPlaylist(modelData.id)
+                onClicked: toplistPage.openPlaylist(modelData.id, index)
             }
         }
     }

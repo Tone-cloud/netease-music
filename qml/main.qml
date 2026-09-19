@@ -244,8 +244,8 @@ if (item) item.load(id)
             sourceComponent: Component {
                 Pages.ToplistPage {
                     onBackClicked: root.goBack()
-                    onOpenPlaylist: function(id) { root.navigateTo("playlist", { id: id }) }
-                    onLoaded: function(item) { /* 排行榜数据已内置 */ }
+                    onOpenPlaylist: function(id, index) { root.navigateTo("playlist", { id: "top_" + index, idx: index }) }
+                    onLoaded: function(item) { }
                 }
             }
         }
@@ -391,32 +391,7 @@ if (item) item.load(id)
 
     // ── 私人 FM ──
     function openPersonalFM() {
-        console.log("[fm] 加载私人FM...")
-        root.showToast("加载私人FM...")
-        ApiClient.personalFM(function(d) {
-            if (d.code === 200 && d.data && d.data.length > 0) {
-                var songs = []
-                for (var i = 0; i < d.data.length; i++) {
-                    var s = d.data[i]
-                    songs.push({
-                        id: s.id,
-                        name: s.name,
-                        artist: s.artists && s.artists.length > 0 ? s.artists[0].name : "",
-                        album: s.album ? s.album.name : "",
-                        duration: s.duration || 0,
-                        cover: s.album ? s.album.picUrl : ""
-                    })
-                }
-                console.log("[fm] 加载到", songs.length, "首歌")
-                root.playAll(songs)
-            } else {
-                console.log("[fm] 加载失败 code:", d.code)
-                root.showToast("私人FM加载失败")
-            }
-        }, function(e) {
-            console.log("[fm] 加载错误:", e)
-            root.showToast("私人FM加载错误")
-        })
+        root.navigateTo("playlist", { id: "fm" })
     }
 
     // ── 播放控制 ──

@@ -39,6 +39,7 @@ type BatchTask struct {
 	ID     int64  `json:"id"`
 	Name   string `json:"name"`
 	Artist string `json:"artist"`
+	Folder string `json:"folder"`
 }
 
 type BatchStatus struct {
@@ -117,7 +118,7 @@ func startBatchDownload(tasks []BatchTask) {
 			batchMu.Unlock()
 
 			// 执行下载
-			err := downloadSong(task.ID, task.Name, task.Artist)
+			err := downloadSong(task.ID, task.Name, task.Artist, task.Folder)
 			batchMu.Lock()
 			if err != nil {
 				if strings.Contains(err.Error(), "已存在") {
@@ -135,12 +136,17 @@ func startBatchDownload(tasks []BatchTask) {
 	}()
 }
 
-func downloadSong(id int64, name, artist string) error {
+func downloadSong(id int64, name, artist, folder string) error {
 	safeName := sanitizeFilename(name)
 	if safeName == "" {
 		safeName = fmt.Sprintf("%d", id)
 	}
-	dlFile := filepath.Join(musicDir, safeName+".mp3")
+	targetDir := musicDir
+	if safeFolder := sanitizeFilename(folder); safeFolder != "" {
+		targetDir = filepath.Join(musicDir, safeFolder)
+	}
+	os.MkdirAll(targetDir, 0755)
+	dlFile := filepath.Join(targetDir, safeName+".mp3")
 	// 检查是否已下载
 	if _, err := os.Stat(dlFile); err == nil {
 		return fmt.Errorf("已存在")

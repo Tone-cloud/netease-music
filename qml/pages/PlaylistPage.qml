@@ -420,10 +420,22 @@ Rectangle {
         if (id === "daily") {
             ApiClient.dailyRecommend(function(d) {
                 playlistPage.loading = false
-                playlistPage.playlistName = "每日推荐"
+                playlistPage.playlistName = "每日推荐-" + todayString()
                 if (d.code === 200 && d.data && d.data.dailySongs) {
                     parseSongs(d.data.dailySongs)
                 }
+            }, function(e) { playlistPage.loading = false })
+        } else if (id === "recent") {
+            ApiClient.recentSong(100, function(d) {
+                playlistPage.loading = false
+                playlistPage.playlistName = "最近播放"
+                if (d.code === 200 && d.data) parseRecentSongs(d.data)
+            }, function(e) { playlistPage.loading = false })
+        } else if (id === "fm") {
+            ApiClient.personalFM(function(d) {
+                playlistPage.loading = false
+                playlistPage.playlistName = "私人FM"
+                if (d.code === 200 && d.data) parseSongs(d.data)
             }, function(e) { playlistPage.loading = false })
         } else {
             ApiClient.playlistDetail(id, function(d) {
@@ -443,17 +455,33 @@ Rectangle {
         for (var i = 0; i < Math.min(tracks.length, 50); i++) {
             var s = tracks[i]
             var artists = []
-            if (s.ar) for (var j = 0; j < s.ar.length; j++) artists.push(s.ar[j].name)
+            var artistList = s.ar || s.artists || []
+            if (artistList) for (var j = 0; j < artistList.length; j++) artists.push(artistList[j].name)
+            var album = s.al || s.album || {}
             list.push({
                 id: s.id,
                 name: s.name,
                 artist: artists.join(" / "),
-                album: s.al ? s.al.name : "",
-                duration: s.dt || 0,
-                cover: s.al ? (s.al.picUrl || "") : ""
+                album: album.name || "",
+                duration: s.dt || s.duration || 0,
+                cover: album.picUrl || album.pic || ""
             })
         }
         playlistPage.songs = list
+    }
+
+    function parseRecentSongs(items) {
+        var tracks = []
+        for (var i = 0; i < items.length; i++) {
+            if (items[i].song) tracks.push(items[i].song)
+        }
+        parseSongs(tracks)
+    }
+
+    function todayString() {
+        var d = new Date()
+        function pad(n) { return n < 10 ? "0" + n : String(n) }
+        return d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate())
     }
 
     // ── 批量下载 ──
@@ -462,7 +490,7 @@ Rectangle {
         var taskList = []
         for (var i = 0; i < playlistPage.songs.length; i++) {
             var s = playlistPage.songs[i]
-            taskList.push({ id: s.id, name: s.name, artist: s.artist })
+            taskList.push({ id: s.id, name: s.name, artist: s.artist, folder: playlistPage.playlistName })
         }
         playlistPage.batchTotal = taskList.length
         playlistPage.batchDone = 0

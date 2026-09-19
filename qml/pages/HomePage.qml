@@ -81,6 +81,7 @@ Rectangle {
                             onClicked: {
                                 if (modelData.action === "daily") homePage.openPlaylist("daily")
                                 else if (modelData.action === "fm") homePage.openPersonalFM()
+                                else if (modelData.action === "recent") homePage.openPlaylist("recent")
                             }
                         }
                     }
