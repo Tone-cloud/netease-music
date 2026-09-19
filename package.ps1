@@ -1,9 +1,9 @@
-﻿# 打包脚本 - 生成 netease_music_v3.zip
+﻿# 打包脚本 - 生成 com.netease.music.zip
 # 注意：libnetease_player.so 需要从 GitHub Actions 下载后放入插件目录
 
 $ErrorActionPreference = "Stop"
 $root = "C:\Users\aresi\Desktop\cc\netease_music_v3"
-$out = "C:\Users\aresi\Desktop\cc\netease_music_v3.zip"
+$out = "C:\Users\aresi\Desktop\cc\com.netease.music.zip"
 
 if (Test-Path $out) { Remove-Item $out -Force }
 

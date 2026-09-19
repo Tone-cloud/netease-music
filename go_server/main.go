@@ -582,8 +582,8 @@ button{padding:10px 30px;background:#c20c0c;color:white;border:none;border-radiu
 button:hover{background:#a00a0a}#result{margin-top:15px;font-weight:bold}</style></head>
 <body><h1>网易云音乐登录</h1>
 <div class="tip">1. 电脑浏览器打开 <b>music.163.com</b> 并登录<br>
-2. 按 <b>F12</b> → Application(应用) → Cookies → 找到 <b>MUSIC_U</b><br>
-3. 复制 MUSIC_U 的值，粘贴到下面，点击导入</div>
+2. 打开浏览器的 <b>Cookie-Editor</b> 扩展<br>
+3. 找到 <b>MUSIC_U</b>，复制它的值，粘贴到下面，点击导入</div>
 <textarea id="musicU" placeholder="粘贴 MUSIC_U 的值（一长串字符）"></textarea>
 <br><br><button onclick="doImport()">导入登录</button>
 <p id="result"></p>
