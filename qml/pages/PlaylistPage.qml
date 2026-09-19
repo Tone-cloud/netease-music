@@ -432,11 +432,8 @@ Rectangle {
                 if (d.code === 200 && d.data) parseRecentSongs(d.data)
             }, function(e) { playlistPage.loading = false })
         } else if (id === "fm") {
-            ApiClient.personalFM(function(d) {
-                playlistPage.loading = false
-                playlistPage.playlistName = "私人FM"
-                if (d.code === 200 && d.data) parseSongs(d.data)
-            }, function(e) { playlistPage.loading = false })
+            playlistPage.playlistName = "私人FM"
+            loadFMTracks(0, [])
         } else {
             ApiClient.playlistDetail(id, function(d) {
                 playlistPage.loading = false
@@ -476,6 +473,22 @@ Rectangle {
             if (items[i].song) tracks.push(items[i].song)
         }
         parseSongs(tracks)
+    }
+
+    function loadFMTracks(round, tracks) {
+        if (round >= 5) {
+            playlistPage.loading = false
+            parseSongs(tracks)
+            return
+        }
+        ApiClient.personalFM(function(d) {
+            var nextTracks = tracks
+            if (d.code === 200 && d.data) nextTracks = tracks.concat(d.data)
+            loadFMTracks(round + 1, nextTracks)
+        }, function(e) {
+            playlistPage.loading = false
+            parseSongs(tracks)
+        })
     }
 
     function todayString() {

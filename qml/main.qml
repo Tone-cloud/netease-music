@@ -97,7 +97,7 @@ Rectangle {
         newStack.push({ page: currentPage, props: captureProps(currentPage) })
         pageStack = newStack
         applyProps(page, props || {})
-        restorePageState(page)
+        if (!props || Object.keys(props).length === 0) restorePageState(page)
         _animating = true
         currentPage = page
         pageTransition.restart()
