@@ -21,7 +21,13 @@ HEADERS += \
 INCLUDEPATH += $$PWD/../qt-5.15.2-for-aarch64-dictpen-linux/include/QtQml
 INCLUDEPATH += $$PWD/../qt-5.15.2-for-aarch64-dictpen-linux/include/QtQml/5.15.2
 INCLUDEPATH += $$PWD/../qt-5.15.2-for-aarch64-dictpen-linux/include
-LIBS += -lQt5Qml
+
+# Qt and PenMods device libraries used by the cross linker
+LIBS += -L$$PWD/../qt-5.15.2-for-aarch64-dictpen-linux/lib
+exists($$PWD/../dictpen-libs) {
+    LIBS += -L$$PWD/../dictpen-libs
+}
+LIBS += -lQt5Qml -lGLESv2 -lEGL -lmali
 
 # 编译选项
 QMAKE_CXXFLAGS += -Wno-deprecated-declarations -Wno-unused-parameter
