@@ -145,7 +145,7 @@ Rectangle {
         model: localPage.files
 
         delegate: Rectangle {
-            width: parent.width
+            width: fileList.width
             height: 32
             color: index % 2 === 0 ? Theme.bgPrimary : Theme.bgCard
 

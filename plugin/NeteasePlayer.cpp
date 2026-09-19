@@ -237,7 +237,6 @@ void NeteasePlayer::play(const QString &source) {
     stop();
 
     m_source = source;
-    emit sourceChanged(source);
     m_errorString.clear();
 
     // 如果是网络 URL，先通过 Go server 下载缓存到本地，再播放本地文件

@@ -155,7 +155,6 @@ Rectangle {
                 console.log("[PlayerPage] got url, calling player.play")
                 if (player) {
                     player.play(playerPage.playUrl)
-                    playerPage.setPlayState("playing", "已通过系统播放器播放")
                 } else {
                     playerPage.caching = false
                     playerPage.setPlayState("error", "播放器初始化失败")
