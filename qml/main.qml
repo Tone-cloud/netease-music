@@ -20,7 +20,6 @@ Rectangle {
     // ── 全局播放器 ──
     NeteasePlayer {
         id: player
-        volume: 0.8
         onFinished: { if (root.playlist.length > 0) root.playNext() }
         onErrorOccurred: function(msg) { root.showToast("播放错误: " + msg) }
     }
