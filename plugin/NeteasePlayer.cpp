@@ -416,7 +416,7 @@ void NeteasePlayer::playWithSystemPlayer(const QString &filePath) {
 
     // ========== Step 4: 创建 YColumnMediaEntity（完全对齐 PenMods 字段） ==========
     qDebug() << "[NeteasePlayer] step4: create entity, sizeof=" << sizeof(YColumnMediaEntity);
-    void* memory = new char[sizeof(YColumnMediaEntity)];
+    char* memory = new char[sizeof(YColumnMediaEntity)];
     memset(memory, 0, sizeof(YColumnMediaEntity));
     entityCtor(memory, nullptr);
     YColumnMediaEntity* entity = reinterpret_cast<YColumnMediaEntity*>(memory);
@@ -497,7 +497,6 @@ void NeteasePlayer::checkSystemPlayerState() {
         m_systemPlayerTimer->stop();
         m_usingSystemPlayer = false;
         setPlaying(false);
-        setPaused(false);
         emit finished();
     }
 }
