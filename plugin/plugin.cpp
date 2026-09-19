@@ -11,7 +11,6 @@ extern "C" {
 // 必须导出：PenMods 加载后首先调用
 void init_plugin() {
     qDebug() << "[NeteasePlugin] init_plugin called";
-    // avformat_network_init() 在 AudioDecoder 构造函数中调用
 }
 
 // 可选导出：QML 引擎就绪后调用，用于注册自定义 QML 类型

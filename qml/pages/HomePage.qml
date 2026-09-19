@@ -73,44 +73,14 @@ Rectangle {
                             { label: "私人FM", action: "fm", icon: "📻" },
                             { label: "最近播放", action: "recent", icon: "⏱" }
                         ]
-                        Rectangle {
+                        QuickActionCard {
                             width: (parent.width - Theme.spacingSmall * 2) / 3
                             height: 36
-                            color: Theme.bgCard
-                            radius: Theme.radiusLarge
-                            border.color: Theme.borderLight
-                            border.width: 0.5
-
-                            scale: quickMouse.pressed ? 0.96 : 1.0
-                            Behavior on scale { NumberAnimation { duration: 80 } }
-
-                            Column {
-                                anchors.centerIn: parent
-                                spacing: 1
-
-                                Text {
-                                    anchors.horizontalCenter: parent.horizontalCenter
-                                    text: modelData.icon
-                                    font.pixelSize: 12
-                                }
-                                Text {
-                                    anchors.horizontalCenter: parent.horizontalCenter
-                                    text: modelData.label
-                                    color: Theme.textSecondary
-                                    font.pixelSize: Theme.fontTiny
-                                    font.family: Theme.fontFamily
-                                    font.bold: true
-                                }
-                            }
-
-                            MouseArea {
-                                id: quickMouse
-                                anchors.fill: parent
-                                anchors.margins: -3
-                                onClicked: {
-                                    if (modelData.action === "daily") homePage.openPlaylist("daily")
-                                    else if (modelData.action === "fm") homePage.openPersonalFM()
-                                                                    }
+                            icon: modelData.icon
+                            label: modelData.label
+                            onClicked: {
+                                if (modelData.action === "daily") homePage.openPlaylist("daily")
+                                else if (modelData.action === "fm") homePage.openPersonalFM()
                             }
                         }
                     }
@@ -126,45 +96,15 @@ Rectangle {
                             { label: "本地音乐", action: "local", icon: "🎵" },
                             { label: "我的", action: "user", icon: "👤" }
                         ]
-                        Rectangle {
+                        QuickActionCard {
                             width: (parent.width - Theme.spacingSmall * 2) / 3
                             height: 36
-                            color: Theme.bgCard
-                            radius: Theme.radiusLarge
-                            border.color: Theme.borderLight
-                            border.width: 0.5
-
-                            scale: quickMouse2.pressed ? 0.96 : 1.0
-                            Behavior on scale { NumberAnimation { duration: 80 } }
-
-                            Column {
-                                anchors.centerIn: parent
-                                spacing: 1
-
-                                Text {
-                                    anchors.horizontalCenter: parent.horizontalCenter
-                                    text: modelData.icon
-                                    font.pixelSize: 12
-                                }
-                                Text {
-                                    anchors.horizontalCenter: parent.horizontalCenter
-                                    text: modelData.label
-                                    color: Theme.textSecondary
-                                    font.pixelSize: Theme.fontTiny
-                                    font.family: Theme.fontFamily
-                                    font.bold: true
-                                }
-                            }
-
-                            MouseArea {
-                                id: quickMouse2
-                                anchors.fill: parent
-                                anchors.margins: -3
-                                onClicked: {
-                                    if (modelData.action === "toplist") homePage.openToplist(0)
-                                    else if (modelData.action === "local") homePage.openLocal()
-                                    else if (modelData.action === "user") homePage.openUser()
-                                }
+                            icon: modelData.icon
+                            label: modelData.label
+                            onClicked: {
+                                if (modelData.action === "toplist") homePage.openToplist(0)
+                                else if (modelData.action === "local") homePage.openLocal()
+                                else if (modelData.action === "user") homePage.openUser()
                             }
                         }
                     }
@@ -240,83 +180,12 @@ Rectangle {
                     Repeater {
                         model: homePage.recommendList
 
-                        Rectangle {
-                            width: 72
-                            height: 88
-                            color: Theme.bgCard
-                            radius: Theme.radiusMedium
-                            border.color: Theme.borderLight
-                            border.width: 0.5
-
-                            scale: playlistMouse.pressed ? 0.96 : 1.0
-                            Behavior on scale { NumberAnimation { duration: 80 } }
-
-                            Column {
-                                anchors.fill: parent
-                                anchors.margins: 4
-                                spacing: 4
-
-                                // 封面图
-                                Rectangle {
-                                    width: parent.width
-                                    height: 56
-                                    radius: Theme.radiusSmall
-                                    clip: true
-                                    color: Theme.bgSecondary
-
-                                    Image {
-                                        anchors.fill: parent
-                                        source: modelData.picUrl || ""
-                                        fillMode: Image.PreserveAspectCrop
-                                        asynchronous: true
-                                        cache: true
-                                        sourceSize.width: 100
-                                        sourceSize.height: 100
-                                    }
-
-                                    // 播放数角标（优化：更大字体，显示所有播放量）
-                                    Rectangle {
-                                        anchors.top: parent.top
-                                        anchors.right: parent.right
-                                        anchors.topMargin: 2
-                                        anchors.rightMargin: 2
-                                        width: playCountText.width + 8
-                                        height: 14
-                                        radius: 7
-                                        color: "#99000000"
-                                        visible: modelData.playcount > 0
-
-                                        Text {
-                                            id: playCountText
-                                            anchors.centerIn: parent
-                                            text: homePage.formatPlayCount(modelData.playcount)
-                                            color: "white"
-                                            font.pixelSize: 9
-                                            font.family: Theme.fontFamily
-                                            font.bold: true
-                                        }
-                                    }
-                                }
-
-                                // 歌单名称（单行，bili风格）
-                                Text {
-                                    text: modelData.name || ""
-                                    color: Theme.textSecondary
-                                    font.pixelSize: Theme.fontTiny
-                                    font.family: Theme.fontFamily
-                                    elide: Text.ElideRight
-                                    width: parent.width
-                                    maximumLineCount: 1
-                                    wrapMode: Text.NoWrap
-                                }
-                            }
-
-                            MouseArea {
-                                id: playlistMouse
-                                anchors.fill: parent
-                                anchors.margins: -3
-                                onClicked: if (modelData.id) homePage.openPlaylist(String(modelData.id))
-                            }
+                        PlaylistCard {
+                            title: modelData.name || ""
+                            coverUrl: modelData.picUrl || ""
+                            badgeText: homePage.formatPlayCount(modelData.playcount)
+                            showBadge: modelData.playcount > 0
+                            onClicked: if (modelData.id) homePage.openPlaylist(String(modelData.id))
                         }
                     }
 
@@ -417,46 +286,19 @@ Rectangle {
                     { label: "我的", idx: 3 }
                 ]
 
-                Rectangle {
+                TabButton {
                     width: parent.tabButtonWidth
                     height: 20
-                    radius: 10
-                    color: {
-                        if (tabMouseArea.pressed) return Theme.withAlpha(Theme.primary, 0.2)
-                        return homePage.tabIndex === modelData.idx
-                            ? Theme.withAlpha(Theme.primary, 0.15)
-                            : "transparent"
-                    }
-
-                    scale: tabMouseArea.pressed ? 0.92 : 1.0
-                    Behavior on scale { NumberAnimation { duration: 80 } }
-                    Behavior on color { ColorAnimation { duration: 100 } }
-
-                    Text {
-                        text: modelData.label
-                        color: homePage.tabIndex === modelData.idx ? Theme.primary : Theme.textSecondary
-                        font.family: Theme.fontFamily
-                        font.pixelSize: Theme.fontSmall
-                        font.bold: homePage.tabIndex === modelData.idx
-                        anchors.centerIn: parent
-
-                        Behavior on color { ColorAnimation { duration: 100 } }
-                    }
-
-                    MouseArea {
-                        id: tabMouseArea
-                        anchors.fill: parent
-                        anchors.margins: -4
-                        onClicked: {
-                            homePage.tabIndex = modelData.idx
-                            if (modelData.idx === 0) {
-                                // 推荐，当前页，再次点击刷新
-                                homePage.loadRecommend()
-                            } else if (modelData.idx === 2) {
-                                homePage.openSearch()
-                            } else if (modelData.idx === 3) {
-                                homePage.openUser()
-                            }
+                    selected: homePage.tabIndex === modelData.idx
+                    text: modelData.label
+                    onClicked: {
+                        homePage.tabIndex = modelData.idx
+                        if (modelData.idx === 0) {
+                            homePage.loadRecommend()
+                        } else if (modelData.idx === 2) {
+                            homePage.openSearch()
+                        } else if (modelData.idx === 3) {
+                            homePage.openUser()
                         }
                     }
                 }

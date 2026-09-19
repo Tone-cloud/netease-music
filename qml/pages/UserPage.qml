@@ -158,7 +158,7 @@ Rectangle {
                                 anchors.verticalCenter: parent.verticalCenter
                                 anchors.left: parent.left
                                 anchors.leftMargin: 6
-                                text: "http://词典笔IP:8002/login"
+                                text: "http://词典笔IP:8667/login"
                                 color: Theme.primary
                                 font.pixelSize: Theme.fontTiny
                                 font.family: Theme.fontFamily

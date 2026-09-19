@@ -42,17 +42,29 @@ type BatchTask struct {
 }
 
 type BatchStatus struct {
-	Running     bool   `json:"running"`
-	Total       int    `json:"total"`
-	Done        int    `json:"done"`
-	Failed      int    `json:"failed"`
-	Skipped     int    `json:"skipped"`
-	CurrentIdx  int    `json:"currentIdx"`
-	CurrentName string `json:"currentName"`
-	CurrentSize int64  `json:"currentSize"`
-	CurrentTotal int64 `json:"currentTotal"`
-	Finished    bool   `json:"finished"`
-	Cancelled   bool   `json:"cancelled"`
+	Running      bool   `json:"running"`
+	Total        int    `json:"total"`
+	Done         int    `json:"done"`
+	Failed       int    `json:"failed"`
+	Skipped      int    `json:"skipped"`
+	CurrentIdx   int    `json:"currentIdx"`
+	CurrentName  string `json:"currentName"`
+	CurrentSize  int64  `json:"currentSize"`
+	CurrentTotal int64  `json:"currentTotal"`
+	Finished     bool   `json:"finished"`
+	Cancelled    bool   `json:"cancelled"`
+}
+
+type TransferStatus struct {
+	Action    string  `json:"action"`
+	FileName  string  `json:"fileName"`
+	Total     int64   `json:"total"`
+	Done      int64   `json:"done"`
+	Percent   float64 `json:"percent"`
+	Running   bool    `json:"running"`
+	Finished  bool    `json:"finished"`
+	Error     string  `json:"error"`
+	UpdatedAt int64   `json:"updatedAt"`
 }
 
 var (
@@ -62,18 +74,26 @@ var (
 	batchStatus  BatchStatus
 	batchCancel  bool
 	batchRunning bool
+	transferMu   sync.Mutex
+	transferStatus TransferStatus
 )
 
 func startBatchDownload(tasks []BatchTask) {
+	batchMu.Lock()
 	if batchRunning {
+		batchMu.Unlock()
 		return
 	}
 	batchTasks = tasks
 	batchIdx = 0
 	batchCancel = false
 	batchStatus = BatchStatus{
-		Running: true,
-		Total:   len(tasks),
+		Running:     true,
+		Total:       len(tasks),
+		CurrentIdx:  0,
+		CurrentName: "",
+		Finished:    false,
+		Cancelled:   false,
 	}
 	batchRunning = true
 	batchMu.Unlock()
@@ -149,6 +169,34 @@ func getBatchStatus() BatchStatus {
 	batchMu.Lock()
 	defer batchMu.Unlock()
 	return batchStatus
+}
+
+func updateTransferStatus(action, fileName string, total, done int64, running bool, errMsg string) {
+	transferMu.Lock()
+	defer transferMu.Unlock()
+	if total > 0 {
+		transferStatus.Percent = float64(done) * 100.0 / float64(total)
+	} else {
+		transferStatus.Percent = 0
+	}
+	transferStatus.Action = action
+	transferStatus.FileName = fileName
+	transferStatus.Total = total
+	transferStatus.Done = done
+	transferStatus.Running = running
+	transferStatus.Finished = !running
+	transferStatus.Error = errMsg
+	transferStatus.UpdatedAt = time.Now().UnixMilli()
+}
+
+func getTransferStatus() TransferStatus {
+	transferMu.Lock()
+	defer transferMu.Unlock()
+	return transferStatus
+}
+
+func clearTransferStatus() {
+	updateTransferStatus("", "", 0, 0, false, "")
 }
 
 func cancelBatchDownload() {
@@ -232,6 +280,7 @@ func main() {
 	http.HandleFunc("/download/batch/start", handleBatchStart)
 	http.HandleFunc("/download/batch/status", handleBatchStatus)
 	http.HandleFunc("/download/batch/cancel", handleBatchCancel)
+	http.HandleFunc("/transfer/status", handleTransferStatus)
 	http.HandleFunc("/local/list", handleLocalList)
 	http.HandleFunc("/local/delete", handleLocalDelete)
 	http.HandleFunc("/audio", handleAudioProxy)
@@ -760,7 +809,7 @@ func handleCache(w http.ResponseWriter, r *http.Request) {
 
 	// 如果是 ID 模式，先获取播放地址
 	if songUrl == "" {
-		body := fmt.Sprintf(`{"ids":"[%d]","level":"standard","encodeType":"mp3"}`, id)
+		body := fmt.Sprintf(`{"ids":"[%s]","level":"standard","encodeType":"mp3"}`, id)
 		data, err := weapiPost("/weapi/song/enhance/player/url/v1", body)
 		if err != nil {
 			writeError(w, err.Error())
@@ -782,11 +831,13 @@ func handleCache(w http.ResponseWriter, r *http.Request) {
 	}
 
 	fmt.Printf("[cache] downloading to %s\n", cacheFile)
-	// 下载
-	if err := downloadFile(songUrl, cacheFile); err != nil {
+	updateTransferStatus("cache", filepath.Base(cacheFile), 0, 0, true, "")
+	if err := downloadFileWithProgress(songUrl, cacheFile, "cache"); err != nil {
+		updateTransferStatus("cache", filepath.Base(cacheFile), 0, 0, false, err.Error())
 		writeError(w, "下载失败: "+err.Error())
 		return
 	}
+	updateTransferStatus("cache", filepath.Base(cacheFile), 1, 1, false, "")
 	writeJSON(w, map[string]interface{}{"code": 200, "path": cacheFile, "cached": false})
 }
 
@@ -809,7 +860,7 @@ func handleDownload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// 获取地址并下载
-	body := fmt.Sprintf(`{"ids":"[%d]","level":"standard","encodeType":"mp3"}`, id)
+	body := fmt.Sprintf(`{"ids":"[%s]","level":"standard","encodeType":"mp3"}`, id)
 	data, err := weapiPost("/weapi/song/enhance/player/url/v1", body)
 	if err != nil {
 		writeError(w, err.Error())
@@ -828,10 +879,13 @@ func handleDownload(w http.ResponseWriter, r *http.Request) {
 		writeError(w, "歌曲无可用播放地址")
 		return
 	}
-	if err := downloadFile(songUrl, dlFile); err != nil {
+	updateTransferStatus("download", filepath.Base(dlFile), 0, 0, true, "")
+	if err := downloadFileWithProgress(songUrl, dlFile, "download"); err != nil {
+		updateTransferStatus("download", filepath.Base(dlFile), 0, 0, false, err.Error())
 		writeError(w, "下载失败: "+err.Error())
 		return
 	}
+	updateTransferStatus("download", filepath.Base(dlFile), 1, 1, false, "")
 	writeJSON(w, map[string]interface{}{"code": 200, "path": dlFile, "name": name, "artist": artist})
 }
 
@@ -888,6 +942,11 @@ func handleBatchStatus(w http.ResponseWriter, r *http.Request) {
 func handleBatchCancel(w http.ResponseWriter, r *http.Request) {
 	cancelBatchDownload()
 	writeJSON(w, map[string]interface{}{"code": 200, "msg": "已取消"})
+}
+
+func handleTransferStatus(w http.ResponseWriter, r *http.Request) {
+	status := getTransferStatus()
+	writeJSON(w, map[string]interface{}{"code": 200, "status": status})
 }
 
 // ── 本地音乐管理 API ──
@@ -951,6 +1010,10 @@ func handleLocalDelete(w http.ResponseWriter, r *http.Request) {
 
 // 下载文件
 func downloadFile(url, dest string) error {
+	return downloadFileWithProgress(url, dest, "download")
+}
+
+func downloadFileWithProgress(url, dest, action string) error {
 	os.MkdirAll(filepath.Dir(dest), 0755)
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
@@ -974,9 +1037,40 @@ func downloadFile(url, dest string) error {
 		return err
 	}
 	defer out.Close()
-	n, err := io.Copy(out, resp.Body)
-	fmt.Printf("[download] saved %d bytes to %s\n", n, dest)
-	return err
+
+	total := resp.ContentLength
+	if total <= 0 {
+		total = 0
+	}
+	updatedName := filepath.Base(dest)
+	updateTransferStatus(action, updatedName, total, 0, true, "")
+	buf := make([]byte, 64*1024)
+	written := int64(0)
+	for {
+		n, readErr := resp.Body.Read(buf)
+		if n > 0 {
+			if _, wErr := out.Write(buf[:n]); wErr != nil {
+				return wErr
+			}
+			written += int64(n)
+			if total > 0 {
+				updateTransferStatus(action, updatedName, total, written, true, "")
+			}
+		}
+		if readErr == io.EOF {
+			break
+		}
+		if readErr != nil {
+			return readErr
+		}
+	}
+	if total > 0 {
+		updateTransferStatus(action, updatedName, total, total, false, "")
+	} else {
+		updateTransferStatus(action, updatedName, written, written, false, "")
+	}
+	fmt.Printf("[download] saved %d bytes to %s\n", written, dest)
+	return nil
 }
 
 // 清理文件名中的非法字符

@@ -9,11 +9,16 @@ QtObject {
     // 通用 GET 请求
     function get(path, onSuccess, onError) {
         var xhr = new XMLHttpRequest()
+        xhr.timeout = 30000
         xhr.open("GET", baseUrl + path, true)
         xhr.onreadystatechange = function() {
             if (xhr.readyState === 4) {
                 if (xhr.status === 200) {
                     try {
+                        if (!xhr.responseText || xhr.responseText.length === 0) {
+                            if (onError) onError("空响应")
+                            return
+                        }
                         var data = JSON.parse(xhr.responseText)
                         if (onSuccess) onSuccess(data)
                     } catch (e) {
@@ -24,6 +29,9 @@ QtObject {
                 }
             }
         }
+        xhr.ontimeout = function() {
+            if (onError) onError("请求超时")
+        }
         xhr.onerror = function() {
             if (onError) onError("网络错误")
         }
@@ -33,12 +41,17 @@ QtObject {
     // 通用 POST 请求
     function post(path, body, onSuccess, onError) {
         var xhr = new XMLHttpRequest()
+        xhr.timeout = 30000
         xhr.open("POST", baseUrl + path, true)
         xhr.setRequestHeader("Content-Type", "application/json")
         xhr.onreadystatechange = function() {
             if (xhr.readyState === 4) {
                 if (xhr.status === 200) {
                     try {
+                        if (!xhr.responseText || xhr.responseText.length === 0) {
+                            if (onError) onError("空响应")
+                            return
+                        }
                         var data = JSON.parse(xhr.responseText)
                         if (onSuccess) onSuccess(data)
                     } catch (e) {
@@ -48,6 +61,9 @@ QtObject {
                     if (onError) onError("HTTP " + xhr.status)
                 }
             }
+        }
+        xhr.ontimeout = function() {
+            if (onError) onError("请求超时")
         }
         xhr.onerror = function() { if (onError) onError("网络错误") }
         xhr.send(JSON.stringify(body))
@@ -205,6 +221,10 @@ QtObject {
 
     function batchCancel(onSuccess, onError) {
         post("/download/batch/cancel", {}, onSuccess, onError)
+    }
+
+    function transferStatus(onSuccess, onError) {
+        get("/transfer/status", onSuccess, onError)
     }
 
     // ── 本地音乐管理 ──

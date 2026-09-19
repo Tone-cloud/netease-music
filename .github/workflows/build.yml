@@ -14,8 +14,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential git-lfs ffmpeg pkg-config \
-            libavformat-dev libavcodec-dev libavutil-dev libswscale-dev
+          sudo apt-get install -y build-essential git-lfs
 
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -26,29 +25,10 @@ jobs:
       - name: Clone GCC toolchain
         run: git clone --depth 1 https://github.com/Lyrecoul/aarch64-dictpen-linux-gnu-gcc-toolchain.git
 
-      - name: Clone dictpen-libs
-        run: git clone --depth 1 https://github.com/Lyrecoul/dictpen-libs.git
-
       - name: Set up environment
         run: |
           echo "$PWD/qt-5.15.2-for-aarch64-dictpen-linux/bin" >> $GITHUB_PATH
           echo "$PWD/aarch64-dictpen-linux-gnu-gcc-toolchain/bin" >> $GITHUB_PATH
-
-      - name: Prepare FFmpeg headers
-        run: |
-          mkdir -p plugin/include
-          echo "=== pkg-config cflags ==="
-          pkg-config --cflags libavformat libavcodec libavutil libswresample 2>&1 || true
-          for dir in /usr/include/x86_64-linux-gnu/libav* /usr/include/x86_64-linux-gnu/libsw* /usr/include/libav* /usr/include/libsw*; do
-            if [ -d "$dir" ]; then
-              cp -r "$dir" plugin/include/
-              echo "Copied: $dir"
-            fi
-          done
-          echo "=== include 目录 ==="
-          ls -la plugin/include/
-          echo "=== swresample.h 位置 ==="
-          find plugin/include -name "swresample.h" 2>/dev/null || echo "NOT FOUND in include"
 
       - name: Verify environment
         run: |
@@ -64,9 +44,6 @@ jobs:
           ls -d qt-5.15.2-for-aarch64-dictpen-linux/include/QtQuick 2>/dev/null || echo "QtQuick NOT FOUND"
           echo "=== dictpen mkspec ==="
           ls qt-5.15.2-for-aarch64-dictpen-linux/mkspecs/dictpen/ 2>/dev/null || echo "dictpen mkspec NOT FOUND"
-          echo "=== dictpen-libs ==="
-          ls dictpen-libs/ | head -20
-
       - name: Build with qmake
         run: |
           cd plugin

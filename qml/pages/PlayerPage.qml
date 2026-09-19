@@ -30,44 +30,56 @@ Rectangle {
     property bool loadingUrl: false
     property string playUrl: ""
     property bool caching: false
+    property string playState: "idle"    // idle/loading/playing/error
 
     // 听歌记录相关
     property int playStartTime: 0      // 实际开始播放的时间戳
     property var lastSongId: null      // 上一首歌的 ID
     property bool playStarted: false   // 是否已实际开始播放
 
-    // ── 播放器信号监听 ──
-    Connections {
-        target: player
-        function onPositionChanged(ms) { updateLyric(ms) }
-        function onFinished() {
-            // 播放完成：提交记录 + 自动下一首
-            flushScrobble()
-            playerPage.nextSong()
-        }
-        function onErrorOccurred(msg) {
-            statusText.text = "错误: " + msg
-            playerPage.caching = false
+    function setPlayState(state, message) {
+        playerPage.playState = state
+        if (message && message.length > 0) {
+            statusText.text = message
         }
     }
 
-    // ── 缓存检查定时器：轮询播放是否真正开始 ──
-    Timer {
-        id: cacheCheckTimer
-        interval: 500
-        repeat: true
-        onTriggered: {
-            if (player && player.playing) {
+    function resetPlaybackState() {
+        playerPage.playStarted = false
+        playerPage.playStartTime = 0
+        playerPage.lastSongId = null
+        playerPage.caching = false
+        playerPage.loadingUrl = false
+        playerPage.playUrl = ""
+        playerPage.lyricText = ""
+        playerPage.lyricLines = []
+        playerPage.lyricIndex = -1
+    }
+
+    // ── 播放器信号监听 ──
+    Connections {
+        target: player
+        function onSourceChanged(src) {
+            if (src && src.length > 0 && playerPage.currentSong && playerPage.playState !== "playing") {
                 playerPage.caching = false
-                statusText.text = "已通过系统播放器播放"
-                cacheCheckTimer.stop()
-                // 记录实际开始播放时间（用于听歌记录）
+                playerPage.setPlayState("playing", "已通过系统播放器播放")
                 if (!playerPage.playStarted) {
                     playerPage.playStartTime = Math.floor(Date.now() / 1000)
                     playerPage.playStarted = true
                     console.log("[scrobble] 实际开始播放:", playerPage.currentSong.name)
                 }
             }
+        }
+        function onFinished() {
+            // 播放完成：提交记录 + 自动下一首
+            flushScrobble()
+            playerPage.setPlayState("idle", "播放完成")
+            playerPage.nextSong()
+        }
+        function onErrorOccurred(msg) {
+            playerPage.setPlayState("error", "错误: " + msg)
+            playerPage.caching = false
+            playerPage.loadingUrl = false
         }
     }
 
@@ -81,7 +93,10 @@ Rectangle {
         if (currentSong && currentSong.id) {
             lastSongId = currentSong.id
             playStarted = false
+            setPlayState("loading", "获取播放地址...")
             loadAndPlay()
+        } else {
+            resetPlaybackState()
         }
     }
 
@@ -126,7 +141,7 @@ Rectangle {
 
         playerPage.loadingUrl = true
         playerPage.caching = false
-        statusText.text = "获取播放地址..."
+        playerPage.setPlayState("loading", "获取播放地址...")
         lyricText = ""
         lyricLines = []
         lyricIndex = -1
@@ -136,23 +151,24 @@ Rectangle {
             if (d.code === 200 && d.data && d.data[0] && d.data[0].url) {
                 playerPage.playUrl = d.data[0].url
                 playerPage.caching = true
-                statusText.text = "正在缓存..."
+                playerPage.setPlayState("loading", "正在缓存...")
                 console.log("[PlayerPage] got url, calling player.play")
                 if (player) {
                     player.play(playerPage.playUrl)
-                    cacheCheckTimer.start()
+                    playerPage.setPlayState("playing", "已通过系统播放器播放")
                 } else {
                     playerPage.caching = false
+                    playerPage.setPlayState("error", "播放器初始化失败")
                     console.log("[PlayerPage] ERROR: player is null!")
                 }
                 loadLyric(currentSong.id)
             } else {
-                statusText.text = "无法播放（可能需要 VIP）"
+                playerPage.setPlayState("error", "无法播放（可能需要 VIP）")
                 console.log("[PlayerPage] no url in response")
             }
         }, function(e) {
             playerPage.loadingUrl = false
-            statusText.text = "获取地址失败: " + e
+            playerPage.setPlayState("error", "获取地址失败: " + e)
             console.log("[PlayerPage] songUrl error:", e)
         })
     }
