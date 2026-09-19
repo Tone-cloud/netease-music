@@ -100,7 +100,7 @@ Rectangle {
         model: toplistPage.toplists
 
         delegate: Rectangle {
-            width: parent.width
+            width: toplistList.width
             height: 28
             color: index % 2 === 0 ? Theme.bgPrimary : Theme.bgCard
 
