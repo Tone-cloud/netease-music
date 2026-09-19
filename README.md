@@ -76,7 +76,7 @@ com.netease.music/
 
 ### 3. 登录
 
-1. 在电脑浏览器访问 `http://词典笔IP:8667/login`
+1. 在电脑浏览器访问 `http://词典笔IP:8667/verify.html`
 2. 从网易云音乐网页版（music.163.com）Cookie 中复制 `MUSIC_U` 的值
 3. 粘贴到登录页，点击登录
 4. 登录成功后插件自动识别
@@ -114,7 +114,7 @@ GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -ldflags="-s -w" -trimpath -o ../
 
 ### 登录页面打不开
 - 确认电脑和词典笔在同一 WiFi 网络
-- 访问地址：`http://词典笔IP:8667/login`
+- 访问地址：`http://词典笔IP:8667/verify.html`
 - 登录服务独立运行，不依赖主 server
 
 ### 下载失败

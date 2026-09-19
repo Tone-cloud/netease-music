@@ -293,7 +293,9 @@ func main() {
 	go startLoginServer()
 
 	fmt.Println("NeteaseMusic server listening on", listenAddr)
-	http.ListenAndServe(listenAddr, nil)
+	if err := http.ListenAndServe(listenAddr, nil); err != nil {
+		fmt.Println("NeteaseMusic server stopped:", err)
+	}
 }
 
 // 初始化 cookie：获取 NMTID/__csrf 等必需 cookie
@@ -1203,8 +1205,11 @@ func handleAudioProxy(w http.ResponseWriter, r *http.Request) {
 func startLoginServer() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/login", handleLoginPage)
+	mux.HandleFunc("/verify.html", handleLoginPage)
 	mux.HandleFunc("/", handleLoginPage)
 	mux.HandleFunc("/cookies/import", handleImportCookies)
-	fmt.Println("[web-login] 登录服务监听于 http://0.0.0.0:8667/login")
-	http.ListenAndServe("0.0.0.0:8667", mux)
+	fmt.Println("[web-login] 登录服务监听于 http://0.0.0.0:8667/verify.html")
+	if err := http.ListenAndServe("0.0.0.0:8667", mux); err != nil {
+		fmt.Println("[web-login] 登录服务停止:", err)
+	}
 }
