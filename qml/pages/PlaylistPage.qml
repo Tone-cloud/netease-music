@@ -9,7 +9,7 @@ Rectangle {
     color: Theme.bgPrimary
 
     signal backClicked()
-    signal playSong(var song)
+    signal playSong(var song, var contextSongs)
     signal playAll(var songs)
     signal loaded(var item)
 
@@ -26,6 +26,7 @@ Rectangle {
     property int batchDone: 0
     property int batchFailed: 0
     property string batchCurrentName: ""
+    property real batchCurrentProgress: 0
 
     Component.onCompleted: playlistPage.loaded(playlistPage)
 
@@ -252,7 +253,7 @@ Rectangle {
     Rectangle {
         id: batchProgressBar
         width: parent.width
-        height: 18
+        height: 22
         color: Theme.withAlpha(Theme.primary, 0.15)
         anchors.top: infoBar.bottom
         visible: playlistPage.batchDownloading
@@ -262,12 +263,12 @@ Rectangle {
             id: batchProgressFill
             height: parent.height
             color: Theme.withAlpha(Theme.primary, 0.4)
-            width: playlistPage.batchTotal > 0 ? (playlistPage.batchDone / playlistPage.batchTotal) * parent.width : 0
+            width: playlistPage.batchTotal > 0 ? ((playlistPage.batchDone + playlistPage.batchCurrentProgress) / playlistPage.batchTotal) * parent.width : 0
         }
 
         Text {
             anchors.centerIn: parent
-            text: "下载 " + playlistPage.batchDone + "/" + playlistPage.batchTotal + (playlistPage.batchCurrentName ? "  " + playlistPage.batchCurrentName : "")
+            text: "下载 " + playlistPage.batchDone + "/" + playlistPage.batchTotal + "  " + Math.round(playlistPage.batchCurrentProgress * 100) + "%" + (playlistPage.batchCurrentName ? "  " + playlistPage.batchCurrentName : "")
             color: Theme.textPrimary
             font.pixelSize: Theme.fontTiny
             font.family: Theme.fontFamily
@@ -388,7 +389,7 @@ Rectangle {
                     MouseArea {
                         id: playBtnMouse
                         anchors.fill: parent
-                        onClicked: playlistPage.playSong(modelData)
+                        onClicked: playlistPage.playSong(modelData, playlistPage.songs)
                     }
                 }
             }
@@ -396,7 +397,7 @@ Rectangle {
             MouseArea {
                 id: songMouse
                 anchors.fill: parent
-                onClicked: playlistPage.playSong(modelData)
+                onClicked: playlistPage.playSong(modelData, playlistPage.songs)
             }
         }
     }
@@ -508,6 +509,7 @@ Rectangle {
         playlistPage.batchTotal = taskList.length
         playlistPage.batchDone = 0
         playlistPage.batchFailed = 0
+        playlistPage.batchCurrentProgress = 0
         playlistPage.batchCurrentName = taskList[0].name
         playlistPage.batchDownloading = true
 
@@ -538,6 +540,12 @@ Rectangle {
         }, function(e) {
             console.log("[batch] 查询状态失败:", e)
         })
+        ApiClient.transferStatus(function(d) {
+            if (d.code === 200 && d.status && d.status.action === "download") {
+                var s = d.status
+                playlistPage.batchCurrentProgress = s.total > 0 ? Math.max(0, Math.min(1, s.done / s.total)) : 0
+            }
+        }, function(e) {})
     }
 
     Timer {

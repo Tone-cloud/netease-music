@@ -296,6 +296,46 @@ Rectangle {
 
             Item { width: 1 }
 
+            Rectangle {
+                width: 24
+                height: 20
+                anchors.verticalCenter: parent.verticalCenter
+                color: prevMouse.pressed ? Theme.withAlpha(Theme.primary, 0.2) : "transparent"
+                radius: Theme.radiusSmall
+                Text {
+                    anchors.centerIn: parent
+                    text: "|<"
+                    color: playerPage.playlist.length > 1 ? Theme.textPrimary : Theme.textTertiary
+                    font.pixelSize: Theme.fontTiny
+                }
+                MouseArea {
+                    id: prevMouse
+                    anchors.fill: parent
+                    enabled: playerPage.playlist.length > 1
+                    onClicked: playerPage.prevSong()
+                }
+            }
+
+            Rectangle {
+                width: 24
+                height: 20
+                anchors.verticalCenter: parent.verticalCenter
+                color: nextMouse.pressed ? Theme.withAlpha(Theme.primary, 0.2) : "transparent"
+                radius: Theme.radiusSmall
+                Text {
+                    anchors.centerIn: parent
+                    text: ">|"
+                    color: playerPage.playlist.length > 1 ? Theme.textPrimary : Theme.textTertiary
+                    font.pixelSize: Theme.fontTiny
+                }
+                MouseArea {
+                    id: nextMouse
+                    anchors.fill: parent
+                    enabled: playerPage.playlist.length > 1
+                    onClicked: playerPage.nextSong()
+                }
+            }
+
             // 下载按钮
             Rectangle {
                 width: 36

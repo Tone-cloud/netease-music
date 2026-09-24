@@ -210,7 +210,7 @@ Rectangle {
                 Pages.PlaylistPage {
                     playlistId: root.playlistId
                     onBackClicked: root.goBack()
-                    onPlaySong: function(song) { root.playSong(song) }
+                    onPlaySong: function(song, contextSongs) { root.playSong(song, contextSongs) }
                     onPlayAll: function(songs) { root.playAll(songs) }
                     // 修复：每次 playlistId 变化时重新加载（不仅是第一次）
                     onPlaylistIdChanged: {
@@ -395,8 +395,9 @@ if (item) item.load(id)
     }
 
     // ── 播放控制 ──
-    function playSong(song) {
+    function playSong(song, contextSongs) {
         if (!song || !song.id) return
+        if (contextSongs && contextSongs.length > 0) playlist = contextSongs
         currentSong = song
         var exists = -1
         for (var i = 0; i < playlist.length; i++) {
