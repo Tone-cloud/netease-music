@@ -79,7 +79,7 @@ Rectangle {
                         ]
                         QuickActionCard {
                             width: (parent.width - Theme.spacingSmall * 3) / 4
-                            height: 36
+                            height: 38
                             icon: modelData.icon
                             label: modelData.label
                             onClicked: {
@@ -142,14 +142,14 @@ Rectangle {
 
             Flickable {
                 width: parent.width
-                height: 82
+                height: 96
                 contentWidth: hRow.width
                 contentHeight: height
                 flickableDirection: Flickable.HorizontalFlick
                 clip: true
                 Row {
                     id: hRow
-                    spacing: Theme.spacingSmall
+                    spacing: 8
                     Repeater {
                         model: homePage.recommendList
                         PlaylistCard {

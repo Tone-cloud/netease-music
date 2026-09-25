@@ -444,19 +444,11 @@ Rectangle {
         }
     }
 
-    function shouldSkipSong(s) {
-        if (!s) return true
-        var fee = Number(s.fee || (s.privilege && s.privilege.fee) || 0)
-        var cp = Number(s.cp || (s.privilege && s.privilege.cp) || 0)
-        var pay = s.payInfo && s.payInfo.play ? s.payInfo.play : 0
-        return fee > 0 || cp > 0 || pay > 0
-    }
-
     function parseSongs(tracks) {
         var list = []
         for (var i = 0; i < Math.min(tracks.length, 50); i++) {
             var s = tracks[i]
-            if (!s || shouldSkipSong(s)) continue
+            if (!s) continue
             var artists = []
             var artistList = s.ar || s.artists || []
             if (artistList) for (var j = 0; j < artistList.length; j++) artists.push(artistList[j].name)
