@@ -17,7 +17,7 @@ Rectangle {
     signal backClicked()
     signal prevSong()
     signal nextSong()
-    signal downloadRequested(var song)
+    signal downloadRequested(var song, bool withLyrics)
 
     // ── 属性 ──
     property NeteasePlayer player: null
@@ -41,6 +41,18 @@ Rectangle {
         playerPage.playState = state
         if (message && message.length > 0) {
             statusText.text = message
+        }
+    }
+
+    function showDownloadChoice() {
+        if (!currentSong) return
+        downloadDialog.visible = true
+    }
+
+    function startDownload(withLyrics) {
+        downloadDialog.visible = false
+        if (playerPage.downloadRequested) {
+            playerPage.downloadRequested(currentSong, withLyrics)
         }
     }
 
@@ -150,8 +162,8 @@ Rectangle {
             playerPage.loadingUrl = false
             if (d.code === 200 && d.data && d.data[0] && d.data[0].url) {
                 playerPage.playUrl = d.data[0].url
-                playerPage.caching = true
-                playerPage.setPlayState("loading", "正在缓存...")
+                playerPage.caching = false
+                playerPage.setPlayState("loading", "正在播放...")
                 console.log("[PlayerPage] got url, calling player.play")
                 if (player) {
                     player.play(playerPage.playUrl)
@@ -359,9 +371,114 @@ Rectangle {
                 MouseArea {
                     id: downloadMouse
                     anchors.fill: parent
-                    onClicked: if (currentSong) playerPage.downloadRequested(currentSong)
+                    onClicked: if (currentSong) playerPage.showDownloadChoice()
                 }
             }
+        }
+    }
+
+    Rectangle {
+        id: downloadDialog
+        anchors.fill: parent
+        color: "#80000000"
+        visible: false
+        z: 200
+
+        Rectangle {
+            width: 240
+            height: 120
+            radius: 10
+            color: Theme.bgCard
+            anchors.centerIn: parent
+            border.color: Theme.borderLight
+            border.width: 1
+
+            Column {
+                anchors.fill: parent
+                anchors.margins: 12
+                spacing: 8
+
+                Text {
+                    text: "下载当前歌曲？"
+                    color: Theme.textPrimary
+                    font.pixelSize: Theme.fontSmall
+                    font.family: Theme.fontFamily
+                    font.bold: true
+                }
+
+                Text {
+                    text: currentSong ? currentSong.name : ""
+                    color: Theme.textSecondary
+                    font.pixelSize: Theme.fontTiny
+                    font.family: Theme.fontFamily
+                    elide: Text.ElideRight
+                    width: parent.width
+                    maximumLineCount: 1
+                }
+
+                Row {
+                    spacing: 8
+                    Rectangle {
+                        width: 74
+                        height: 24
+                        radius: 4
+                        color: Theme.bgTertiary
+                        Text {
+                            anchors.centerIn: parent
+                            text: "仅音频"
+                            color: Theme.textPrimary
+                            font.pixelSize: Theme.fontTiny
+                            font.family: Theme.fontFamily
+                        }
+                        MouseArea {
+                            anchors.fill: parent
+                            onClicked: playerPage.startDownload(false)
+                        }
+                    }
+
+                    Rectangle {
+                        width: 82
+                        height: 24
+                        radius: 4
+                        color: Theme.primary
+                        Text {
+                            anchors.centerIn: parent
+                            text: "音频 + 歌词"
+                            color: "white"
+                            font.pixelSize: Theme.fontTiny
+                            font.family: Theme.fontFamily
+                            font.bold: true
+                        }
+                        MouseArea {
+                            anchors.fill: parent
+                            onClicked: playerPage.startDownload(true)
+                        }
+                    }
+
+                    Rectangle {
+                        width: 52
+                        height: 24
+                        radius: 4
+                        color: Theme.bgSecondary
+                        Text {
+                            anchors.centerIn: parent
+                            text: "取消"
+                            color: Theme.textSecondary
+                            font.pixelSize: Theme.fontTiny
+                            font.family: Theme.fontFamily
+                        }
+                        MouseArea {
+                            anchors.fill: parent
+                            onClicked: downloadDialog.visible = false
+                        }
+                    }
+                }
+            }
+        }
+
+        MouseArea {
+            anchors.fill: parent
+            onClicked: downloadDialog.visible = false
         }
     }
 

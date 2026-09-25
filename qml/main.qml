@@ -264,7 +264,7 @@ if (item) item.load(id)
                     onBackClicked: root.goBack()
                     onPrevSong: root.playPrev()
                     onNextSong: root.playNext()
-                    onDownloadRequested: function(song) { root.downloadSong(song) }
+                    onDownloadRequested: function(song, withLyrics) { root.downloadSong(song, withLyrics) }
                 }
             }
         }
@@ -428,18 +428,19 @@ if (item) item.load(id)
         currentSong = playlist[currentIndex]
     }
 
-    function downloadSong(song) {
+    function downloadSong(song, includeLyrics) {
         if (!song) return
         transferBusy = true
         transferProgress = 0
         transferLabel = "下载"
         transferFileName = song.name || ""
         transferStatusTimer.restart()
-        ApiClient.download(song.id, song.name, song.artist, function(d) {
+        ApiClient.download(song.id, song.name, song.artist, !!includeLyrics, function(d) {
             transferBusy = false
             transferProgress = 1
             transferLabel = "下载完成"
-            showToast(d.code === 200 ? "下载完成" : "下载失败: " + (d.msg || ""))
+            var msg = d.code === 200 ? (includeLyrics ? "下载完成：音频 + 歌词" : "下载完成") : "下载失败: " + (d.msg || "")
+            showToast(msg)
             transferStatusTimer.stop()
         }, function(e) {
             transferBusy = false
@@ -447,7 +448,7 @@ if (item) item.load(id)
             transferStatusTimer.stop()
             showToast("下载错误: " + e)
         })
-        showToast("开始下载: " + song.name)
+        showToast((includeLyrics ? "开始下载：" : "开始下载：") + song.name + (includeLyrics ? "（含歌词）" : ""))
     }
 
     function pollTransferStatus() {

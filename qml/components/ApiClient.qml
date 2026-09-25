@@ -194,9 +194,17 @@ QtObject {
     }
 
     // 下载
-    function download(id, name, artist, onSuccess, onError) {
-        get("/download?id=" + id + "&name=" + encodeURIComponent(name) + "&artist=" + encodeURIComponent(artist),
-            onSuccess, onError)
+    function download(id, name, artist, withLyrics, onSuccess, onError) {
+        var includeLyrics = (withLyrics === true)
+        var success = onSuccess
+        var fail = onError
+        if (typeof withLyrics === "function") {
+            fail = onSuccess
+            success = withLyrics
+            includeLyrics = false
+        }
+        get("/download?id=" + id + "&name=" + encodeURIComponent(name) + "&artist=" + encodeURIComponent(artist) + "&downloadLrc=" + (includeLyrics ? "1" : "0"),
+            success, fail)
     }
 
     // 缓存（返回本地路径）

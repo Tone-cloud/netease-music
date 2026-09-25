@@ -853,6 +853,7 @@ func handleDownload(w http.ResponseWriter, r *http.Request) {
 	id := r.URL.Query().Get("id")
 	name := r.URL.Query().Get("name")
 	artist := r.URL.Query().Get("artist")
+	includeLrc := r.URL.Query().Get("downloadLrc") == "1"
 	if id == "" {
 		writeError(w, "缺少 id")
 		return
@@ -861,13 +862,16 @@ func handleDownload(w http.ResponseWriter, r *http.Request) {
 	if safeName == "" {
 		safeName = id
 	}
-	dlFile := filepath.Join(musicDir, safeName+".mp3")
-	// 检查是否已下载
+	targetDir := filepath.Join(musicDir, safeName)
+	if err := os.MkdirAll(targetDir, 0755); err != nil {
+		writeError(w, "创建目录失败: "+err.Error())
+		return
+	}
+	dlFile := filepath.Join(targetDir, safeName+".mp3")
 	if _, err := os.Stat(dlFile); err == nil {
 		writeJSON(w, map[string]interface{}{"code": 200, "path": dlFile, "msg": "已存在"})
 		return
 	}
-	// 获取地址并下载
 	body := fmt.Sprintf(`{"ids":"[%s]","level":"standard","encodeType":"mp3"}`, id)
 	data, err := weapiPost("/weapi/song/enhance/player/url/v1", body)
 	if err != nil {
@@ -893,8 +897,35 @@ func handleDownload(w http.ResponseWriter, r *http.Request) {
 		writeError(w, "下载失败: "+err.Error())
 		return
 	}
+	if includeLrc {
+		lrcPath := filepath.Join(targetDir, safeName+".lrc")
+		if err := downloadLyricFile(id, lrcPath); err != nil {
+			fmt.Printf("[download] lyric failed: %v\n", err)
+		}
+	}
 	updateTransferStatus("download", filepath.Base(dlFile), 1, 1, false, "")
-	writeJSON(w, map[string]interface{}{"code": 200, "path": dlFile, "name": name, "artist": artist})
+	writeJSON(w, map[string]interface{}{"code": 200, "path": dlFile, "name": name, "artist": artist, "lrc": includeLrc})
+}
+
+func downloadLyricFile(id string, dest string) error {
+	body := fmt.Sprintf(`{"id":%s,"lv":-1,"tv":-1}`, id)
+	data, err := weapiPost("/weapi/song/lyric", body)
+	if err != nil {
+		return err
+	}
+	var result map[string]interface{}
+	if err := json.Unmarshal(data, &result); err != nil {
+		return err
+	}
+	lrcObj, ok := result["lrc"].(map[string]interface{})
+	if !ok {
+		return fmt.Errorf("未找到歌词")
+	}
+	lyrics, _ := lrcObj["lyric"].(string)
+	if strings.TrimSpace(lyrics) == "" {
+		return fmt.Errorf("歌词为空")
+	}
+	return os.WriteFile(dest, []byte(lyrics), 0644)
 }
 
 func handleDownloads(w http.ResponseWriter, r *http.Request) {
