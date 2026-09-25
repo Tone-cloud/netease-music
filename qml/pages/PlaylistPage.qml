@@ -302,8 +302,11 @@ Rectangle {
         delegate: Rectangle {
             id: songItem
             width: parent.width
-            height: 34
+            height: 42
+            radius: Theme.radiusSmall
             color: songMouse.pressed ? Theme.bgCardHover : (index % 2 === 0 ? Theme.bgPrimary : Theme.bgCard)
+            anchors.leftMargin: 6
+            anchors.rightMargin: 6
 
             Behavior on color { ColorAnimation { duration: 80 } }
 
@@ -313,7 +316,6 @@ Rectangle {
                 anchors.rightMargin: 8
                 spacing: 8
 
-                // 序号
                 Text {
                     anchors.verticalCenter: parent.verticalCenter
                     text: index + 1
@@ -321,34 +323,31 @@ Rectangle {
                     font.pixelSize: Theme.fontTiny
                     font.family: Theme.fontFamily
                     font.bold: index < 3
-                    width: 14
+                    width: 16
                     horizontalAlignment: Text.AlignHCenter
                 }
 
-                // 专辑封面小图
                 Rectangle {
-                    width: 24
-                    height: 24
-                    radius: 4
+                    width: 28
+                    height: 28
+                    radius: 6
                     clip: true
                     color: Theme.bgTertiary
                     anchors.verticalCenter: parent.verticalCenter
-
                     Image {
                         anchors.fill: parent
                         source: modelData.cover || ""
                         fillMode: Image.PreserveAspectCrop
                         asynchronous: true
                         cache: true
-                        sourceSize.width: 48
-                        sourceSize.height: 48
+                        sourceSize.width: 56
+                        sourceSize.height: 56
                     }
                 }
 
-                // 歌曲信息
                 Column {
                     anchors.verticalCenter: parent.verticalCenter
-                    width: parent.width - 14 - 24 - 8 - 24 - 16
+                    width: parent.width - 16 - 28 - 8 - 24 - 12
                     spacing: 0
 
                     Text {
@@ -361,7 +360,7 @@ Rectangle {
                         maximumLineCount: 1
                     }
                     Text {
-                        text: modelData.artist + "  ·  " + (modelData.album || "")
+                        text: modelData.artist + (modelData.album ? "  ·  " + modelData.album : "")
                         color: Theme.textTertiary
                         font.pixelSize: Theme.fontTiny
                         font.family: Theme.fontFamily
@@ -371,21 +370,18 @@ Rectangle {
                     }
                 }
 
-                // 播放按钮
                 Rectangle {
                     width: 22
                     height: 22
                     radius: 11
                     color: playBtnMouse.pressed ? Theme.primaryDark : Theme.primary
                     anchors.verticalCenter: parent.verticalCenter
-
                     Text {
                         anchors.centerIn: parent
                         text: "▶"
                         color: "white"
                         font.pixelSize: 7
                     }
-
                     MouseArea {
                         id: playBtnMouse
                         anchors.fill: parent
@@ -448,10 +444,19 @@ Rectangle {
         }
     }
 
+    function shouldSkipSong(s) {
+        if (!s) return true
+        var fee = Number(s.fee || (s.privilege && s.privilege.fee) || 0)
+        var cp = Number(s.cp || (s.privilege && s.privilege.cp) || 0)
+        var pay = s.payInfo && s.payInfo.play ? s.payInfo.play : 0
+        return fee > 0 || cp > 0 || pay > 0
+    }
+
     function parseSongs(tracks) {
         var list = []
         for (var i = 0; i < Math.min(tracks.length, 50); i++) {
             var s = tracks[i]
+            if (!s || shouldSkipSong(s)) continue
             var artists = []
             var artistList = s.ar || s.artists || []
             if (artistList) for (var j = 0; j < artistList.length; j++) artists.push(artistList[j].name)

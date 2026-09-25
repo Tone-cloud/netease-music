@@ -17,7 +17,7 @@ Rectangle {
     signal openLocal()
     signal openDownload()
     signal openPersonalFM()
-        signal playSong(var song)
+    signal playSong(var song)
 
     property bool isLoggedIn: false
     property string userName: ""
@@ -25,12 +25,10 @@ Rectangle {
     property bool loadingRecommend: false
     property int tabIndex: 0
 
-    // 修复：页面可见时重置底部导航选中状态
     onVisibleChanged: {
         if (visible) tabIndex = 0
-    }  // 0=推荐
+    }
 
-    // 格式化播放量
     function formatPlayCount(count) {
         if (!count || count <= 0) return ""
         if (count >= 100000000) return (count / 100000000).toFixed(1) + "亿"
@@ -38,7 +36,14 @@ Rectangle {
         return String(count)
     }
 
-    // ── 内容区 (无标题栏，高度 = 170 - 26 = 144px) ──
+    function recentQuickList() {
+        var list = []
+        for (var i = 0; i < Math.min(homePage.recommendList.length, 4); i++) {
+            list.push(homePage.recommendList[i])
+        }
+        return list
+    }
+
     Flickable {
         id: contentFlick
         anchors {
@@ -58,63 +63,40 @@ Rectangle {
             width: parent.width
             spacing: Theme.spacingSmall
 
-            // 快捷入口（两行）
             Column {
                 width: parent.width
                 spacing: Theme.spacingSmall
 
-                // 第一行：每日推荐、私人FM、最近播放
                 Row {
                     width: parent.width
                     spacing: Theme.spacingSmall
                     Repeater {
                         model: [
                             { label: "每日推荐", action: "daily", icon: "📅" },
-                            { label: "私人FM", action: "fm", icon: "📻" },
-                            { label: "最近播放", action: "recent", icon: "⏱" }
+                            { label: "漫游", action: "roam", icon: "🧭" },
+                            { label: "雷达歌单", action: "radar", icon: "📡" },
+                            { label: "电音专区", action: "electronic", icon: "🎧" }
                         ]
                         QuickActionCard {
-                            width: (parent.width - Theme.spacingSmall * 2) / 3
+                            width: (parent.width - Theme.spacingSmall * 3) / 4
                             height: 36
                             icon: modelData.icon
                             label: modelData.label
                             onClicked: {
                                 if (modelData.action === "daily") homePage.openPlaylist("daily")
-                                else if (modelData.action === "fm") homePage.openPersonalFM()
-                                else if (modelData.action === "recent") homePage.openPlaylist("recent")
-                            }
-                        }
-                    }
-                }
-
-                // 第二行：排行榜、本地音乐、我的
-                Row {
-                    width: parent.width
-                    spacing: Theme.spacingSmall
-                    Repeater {
-                        model: [
-                            { label: "排行榜", action: "toplist", icon: "🏆" },
-                            { label: "本地音乐", action: "local", icon: "🎵" },
-                            { label: "我的", action: "user", icon: "👤" }
-                        ]
-                        QuickActionCard {
-                            width: (parent.width - Theme.spacingSmall * 2) / 3
-                            height: 36
-                            icon: modelData.icon
-                            label: modelData.label
-                            onClicked: {
-                                if (modelData.action === "toplist") homePage.openToplist(0)
-                                else if (modelData.action === "local") homePage.openLocal()
-                                else if (modelData.action === "user") homePage.openUser()
+                                else if (modelData.action === "roam") homePage.openPlaylist("recent")
+                                else if (modelData.action === "radar") homePage.openPersonalFM()
+                                else if (modelData.action === "electronic") homePage.openToplist(0)
                             }
                         }
                     }
                 }
             }
 
-            // 推荐歌单标题（带刷新按钮）
             Row {
                 width: parent.width
+                spacing: 6
+                anchors.leftMargin: 2
                 Text {
                     text: "推荐歌单"
                     color: Theme.textPrimary
@@ -131,8 +113,6 @@ Rectangle {
                     font.family: Theme.fontFamily
                     anchors.verticalCenter: parent.verticalCenter
                 }
-                Item { width: 1; height: 1 }
-                // 刷新按钮
                 Rectangle {
                     width: 20
                     height: 20
@@ -141,7 +121,6 @@ Rectangle {
                     border.color: Theme.borderLight
                     border.width: 0.5
                     anchors.verticalCenter: parent.verticalCenter
-
                     Text {
                         anchors.centerIn: parent
                         text: "↻"
@@ -152,20 +131,15 @@ Rectangle {
                         rotation: homePage.loadingRecommend ? 180 : 0
                         Behavior on rotation { NumberAnimation { duration: 500 } }
                     }
-
                     MouseArea {
                         id: refreshMouse
                         anchors.fill: parent
                         anchors.margins: -3
-                        onClicked: {
-                            console.log("[home] 换一批推荐歌单")
-                            homePage.loadRecommend()
-                        }
+                        onClicked: homePage.loadRecommend()
                     }
                 }
             }
 
-            // 推荐歌单列表（横向滚动，带封面）
             Flickable {
                 width: parent.width
                 height: 82
@@ -173,14 +147,11 @@ Rectangle {
                 contentHeight: height
                 flickableDirection: Flickable.HorizontalFlick
                 clip: true
-
                 Row {
                     id: hRow
                     spacing: Theme.spacingSmall
-
                     Repeater {
                         model: homePage.recommendList
-
                         PlaylistCard {
                             title: modelData.name || ""
                             coverUrl: modelData.picUrl || ""
@@ -189,8 +160,6 @@ Rectangle {
                             onClicked: if (modelData.id) homePage.openPlaylist(String(modelData.id))
                         }
                     }
-
-                    // 空状态
                     Text {
                         text: homePage.recommendList.length === 0 && !homePage.loadingRecommend ? "暂无推荐" : ""
                         color: Theme.textTertiary
@@ -200,10 +169,68 @@ Rectangle {
                     }
                 }
             }
+
+            Column {
+                width: parent.width
+                spacing: Theme.spacingSmall
+                Rectangle {
+                    width: parent.width
+                    height: 24
+                    color: "transparent"
+                    Text {
+                        text: "最近常听"
+                        color: Theme.textPrimary
+                        font.pixelSize: Theme.fontNormal
+                        font.bold: true
+                        font.family: Theme.fontFamily
+                        anchors.verticalCenter: parent.verticalCenter
+                    }
+                }
+                Row {
+                    width: parent.width
+                    spacing: Theme.spacingSmall
+                    Repeater {
+                        model: homePage.recentQuickList()
+                        Rectangle {
+                            width: (parent.width - Theme.spacingSmall * 3) / 4
+                            height: 54
+                            radius: Theme.radiusSmall
+                            color: Theme.bgCard
+                            border.color: Theme.borderLight
+                            border.width: 0.5
+                            clip: true
+                            Column {
+                                anchors.fill: parent
+                                anchors.margins: 6
+                                spacing: 4
+                                Image {
+                                    width: parent.width
+                                    height: 26
+                                    source: modelData.picUrl || ""
+                                    fillMode: Image.PreserveAspectCrop
+                                    asynchronous: true
+                                    cache: true
+                                }
+                                Text {
+                                    text: modelData.name || ""
+                                    color: Theme.textPrimary
+                                    font.pixelSize: Theme.fontTiny
+                                    font.family: Theme.fontFamily
+                                    elide: Text.ElideRight
+                                    width: parent.width
+                                }
+                            }
+                            MouseArea {
+                                anchors.fill: parent
+                                onClicked: if (modelData.id) homePage.openPlaylist(String(modelData.id))
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 
-    // ── 底部标签栏 (bili风格：退出按钮在最左) ──
     Rectangle {
         id: tabBar
         width: parent.width
@@ -212,7 +239,6 @@ Rectangle {
         anchors.bottom: parent.bottom
         z: 10
 
-        // 顶部边线
         Rectangle {
             width: parent.width
             height: 1
@@ -226,9 +252,8 @@ Rectangle {
             spacing: 4
 
             readonly property real exitButtonWidth: 24
-            readonly property real tabButtonWidth: (width - exitButtonWidth - spacing * 3) / 3
+            readonly property real tabButtonWidth: (width - exitButtonWidth - spacing * 4) / 4
 
-            // 退出按钮（最左端）
             Rectangle {
                 width: parent.exitButtonWidth
                 height: 20
@@ -239,7 +264,6 @@ Rectangle {
 
                 scale: exitMouseArea.pressed ? 0.92 : 1.0
                 Behavior on scale { NumberAnimation { duration: 80 } }
-                Behavior on color { ColorAnimation { duration: 100 } }
 
                 Canvas {
                     anchors.centerIn: parent
@@ -252,15 +276,12 @@ Rectangle {
                         ctx.lineWidth = 1.4
                         ctx.lineCap = "round"
                         ctx.lineJoin = "round"
-
-                        // 退出图标（门+箭头）
                         ctx.beginPath()
                         ctx.moveTo(7.5, 2)
                         ctx.lineTo(10, 2)
                         ctx.lineTo(10, 10)
                         ctx.lineTo(7.5, 10)
                         ctx.stroke()
-
                         ctx.beginPath()
                         ctx.moveTo(7, 6)
                         ctx.lineTo(2.5, 6)
@@ -279,10 +300,10 @@ Rectangle {
                 }
             }
 
-            // Tab 按钮
             Repeater {
                 model: [
                     { label: "推荐", idx: 0 },
+                    { label: "排行榜", idx: 1 },
                     { label: "搜索", idx: 2 },
                     { label: "我的", idx: 3 }
                 ]
@@ -294,13 +315,10 @@ Rectangle {
                     text: modelData.label
                     onClicked: {
                         homePage.tabIndex = modelData.idx
-                        if (modelData.idx === 0) {
-                            homePage.loadRecommend()
-                        } else if (modelData.idx === 2) {
-                            homePage.openSearch()
-                        } else if (modelData.idx === 3) {
-                            homePage.openUser()
-                        }
+                        if (modelData.idx === 0) homePage.loadRecommend()
+                        else if (modelData.idx === 1) homePage.openToplist(0)
+                        else if (modelData.idx === 2) homePage.openSearch()
+                        else if (modelData.idx === 3) homePage.openUser()
                     }
                 }
             }
@@ -315,7 +333,6 @@ Rectangle {
             if (d.code === 200) {
                 var list = d.recommend || d.playlists || []
                 homePage.recommendList = list.slice(0, 12)
-                console.log("[home] 推荐歌单加载完成，共", homePage.recommendList.length, "个")
             }
         }, function(e) {
             homePage.loadingRecommend = false

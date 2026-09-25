@@ -268,7 +268,46 @@ Rectangle {
                                 }
                             }
 
-                            // 签名
+                            // VIP / 等级 / 签名
+                            Row {
+                                width: parent.width
+                                spacing: 6
+                                Rectangle {
+                                    visible: userPage.userDetail && userPage.userDetail.account && userPage.userDetail.account.vipType > 0
+                                    width: vipText.width + 10
+                                    height: 14
+                                    radius: 7
+                                    color: Theme.withAlpha(Theme.primary, 0.15)
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    Text {
+                                        id: vipText
+                                        anchors.centerIn: parent
+                                        text: "VIP"
+                                        color: Theme.primary
+                                        font.pixelSize: Theme.fontTiny
+                                        font.family: Theme.fontFamily
+                                        font.bold: true
+                                    }
+                                }
+                                Rectangle {
+                                    visible: userPage.userLevel && userPage.userLevel.level
+                                    width: levelText.width + 10
+                                    height: 14
+                                    radius: 7
+                                    color: Theme.withAlpha(Theme.primary, 0.15)
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    Text {
+                                        id: levelText
+                                        anchors.centerIn: parent
+                                        text: "Lv." + (userPage.userLevel ? userPage.userLevel.level : 0)
+                                        color: Theme.primary
+                                        font.pixelSize: Theme.fontTiny
+                                        font.family: Theme.fontFamily
+                                        font.bold: true
+                                    }
+                                }
+                            }
+
                             Text {
                                 text: userPage.userDetail && userPage.userDetail.profile ? (userPage.userDetail.profile.signature || "这个人很懒，什么都没写") : "加载中..."
                                 color: Theme.textSecondary
@@ -279,11 +318,9 @@ Rectangle {
                                 maximumLineCount: 1
                             }
 
-                            // 关注/粉丝/听歌次数
                             Row {
                                 width: parent.width
                                 spacing: 10
-
                                 Text {
                                     text: "关注 " + (userPage.userDetail && userPage.userDetail.profile ? userPage.userDetail.profile.follows : 0)
                                     color: Theme.textTertiary
@@ -297,8 +334,25 @@ Rectangle {
                                     font.family: Theme.fontFamily
                                 }
                                 Text {
-                                    text: "听歌 " + (userPage.userLevel && userPage.userLevel.listenSongs ? userPage.userLevel.listenSongs : 0) + "首"
+                                    text: "累计听歌 " + (userPage.userLevel && userPage.userLevel.listenSongs ? userPage.userLevel.listenSongs : 0) + "首"
                                     color: Theme.textTertiary
+                                    font.pixelSize: Theme.fontTiny
+                                    font.family: Theme.fontFamily
+                                }
+                            }
+
+                            Row {
+                                width: parent.width
+                                spacing: 12
+                                Text {
+                                    text: "时长 " + userPage.formatListenHours()
+                                    color: Theme.textTertiary
+                                    font.pixelSize: Theme.fontTiny
+                                    font.family: Theme.fontFamily
+                                }
+                                Text {
+                                    text: userPage.userDetail && userPage.userDetail.account && userPage.userDetail.account.vipType > 0 ? "已开通会员" : "未开通会员"
+                                    color: userPage.userDetail && userPage.userDetail.account && userPage.userDetail.account.vipType > 0 ? Theme.primary : Theme.textTertiary
                                     font.pixelSize: Theme.fontTiny
                                     font.family: Theme.fontFamily
                                 }
@@ -442,6 +496,12 @@ Rectangle {
                 }
             }
         }
+    }
+
+    function formatListenHours() {
+        var total = userPage.userLevel && userPage.userLevel.listenSongs ? userPage.userLevel.listenSongs : 0
+        var hours = Math.floor(total / 60)
+        return hours + "h"
     }
 
     function loadUserPlaylists() {
