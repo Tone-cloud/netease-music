@@ -28,7 +28,6 @@ Rectangle {
         height: Theme.titleBarHeight
         color: Theme.bgSecondary
 
-        // 顶部边线
         Rectangle {
             width: parent.width
             height: 1
@@ -41,7 +40,6 @@ Rectangle {
             anchors.leftMargin: 6
             spacing: 6
 
-            // 返回按钮
             Rectangle {
                 width: 22
                 height: 22
@@ -100,7 +98,6 @@ Rectangle {
                 spacing: Theme.spacingMedium
                 visible: !userPage.isLoggedIn
 
-                // 占位头像
                 Rectangle {
                     width: 48
                     height: 48
@@ -127,7 +124,6 @@ Rectangle {
                     anchors.horizontalCenter: parent.horizontalCenter
                 }
 
-                // 登录提示卡片
                 Rectangle {
                     width: parent.width
                     height: 60
@@ -181,10 +177,10 @@ Rectangle {
                 spacing: Theme.spacingMedium
                 visible: userPage.isLoggedIn
 
-                // 用户信息卡片
+                // ══ 用户信息卡片 ══
                 Rectangle {
                     width: parent.width
-                    height: 82
+                    height: 90
                     color: Theme.bgCard
                     radius: Theme.radiusLarge
                     border.color: Theme.borderLight
@@ -192,14 +188,14 @@ Rectangle {
 
                     Row {
                         anchors.fill: parent
-                        anchors.margins: 8
+                        anchors.margins: 10
                         spacing: 10
 
-                        // 真实头像（圆形裁剪）
+                        // 头像
                         Rectangle {
-                            width: 44
-                            height: 44
-                            radius: 22
+                            width: 48
+                            height: 48
+                            radius: 24
                             clip: true
                             color: Theme.bgTertiary
                             anchors.verticalCenter: parent.verticalCenter
@@ -211,11 +207,10 @@ Rectangle {
                                 fillMode: Image.PreserveAspectCrop
                                 asynchronous: true
                                 cache: true
-                                sourceSize.width: 88
-                                sourceSize.height: 88
+                                sourceSize.width: 96
+                                sourceSize.height: 96
                             }
 
-                            // 加载失败时显示首字母
                             Text {
                                 anchors.centerIn: parent
                                 text: userPage.userInfo && userPage.userInfo.nickname ? userPage.userInfo.nickname.charAt(0) : "U"
@@ -227,12 +222,13 @@ Rectangle {
                             }
                         }
 
+                        // 用户信息
                         Column {
                             anchors.verticalCenter: parent.verticalCenter
                             spacing: 3
-                            width: parent.parent.width - 60
+                            width: parent.parent.width - 68
 
-                            // 昵称 + 等级
+                            // 昵称 + 等级 + VIP
                             Row {
                                 width: parent.width
                                 spacing: 6
@@ -266,41 +262,21 @@ Rectangle {
                                         font.bold: true
                                     }
                                 }
-                            }
 
-                            // VIP / 等级 / 签名
-                            Row {
-                                width: parent.width
-                                spacing: 6
+                                // VIP 标签
                                 Rectangle {
                                     visible: userPage.userDetail && userPage.userDetail.account && userPage.userDetail.account.vipType > 0
                                     width: vipText.width + 10
                                     height: 14
                                     radius: 7
-                                    color: Theme.withAlpha(Theme.primary, 0.15)
+                                    color: "#1a000000"
                                     anchors.verticalCenter: parent.verticalCenter
+
                                     Text {
                                         id: vipText
                                         anchors.centerIn: parent
                                         text: "VIP"
-                                        color: Theme.primary
-                                        font.pixelSize: Theme.fontTiny
-                                        font.family: Theme.fontFamily
-                                        font.bold: true
-                                    }
-                                }
-                                Rectangle {
-                                    visible: userPage.userLevel && userPage.userLevel.level
-                                    width: levelText.width + 10
-                                    height: 14
-                                    radius: 7
-                                    color: Theme.withAlpha(Theme.primary, 0.15)
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    Text {
-                                        id: levelText
-                                        anchors.centerIn: parent
-                                        text: "Lv." + (userPage.userLevel ? userPage.userLevel.level : 0)
-                                        color: Theme.primary
+                                        color: "#D4AF37"
                                         font.pixelSize: Theme.fontTiny
                                         font.family: Theme.fontFamily
                                         font.bold: true
@@ -308,6 +284,7 @@ Rectangle {
                                 }
                             }
 
+                            // 签名
                             Text {
                                 text: userPage.userDetail && userPage.userDetail.profile ? (userPage.userDetail.profile.signature || "这个人很懒，什么都没写") : "加载中..."
                                 color: Theme.textSecondary
@@ -318,9 +295,11 @@ Rectangle {
                                 maximumLineCount: 1
                             }
 
+                            // 数据统计：关注 / 粉丝 / 累计听歌
                             Row {
                                 width: parent.width
-                                spacing: 10
+                                spacing: 12
+
                                 Text {
                                     text: "关注 " + (userPage.userDetail && userPage.userDetail.profile ? userPage.userDetail.profile.follows : 0)
                                     color: Theme.textTertiary
@@ -341,43 +320,32 @@ Rectangle {
                                 }
                             }
 
-                            Row {
-                                width: parent.width
-                                spacing: 12
-                                Text {
-                                    text: "时长 " + userPage.formatListenHours()
-                                    color: Theme.textTertiary
-                                    font.pixelSize: Theme.fontTiny
-                                    font.family: Theme.fontFamily
-                                }
-                                Text {
-                                    text: userPage.userDetail && userPage.userDetail.account && userPage.userDetail.account.vipType > 0 ? "已开通会员" : "未开通会员"
-                                    color: userPage.userDetail && userPage.userDetail.account && userPage.userDetail.account.vipType > 0 ? Theme.primary : Theme.textTertiary
-                                    font.pixelSize: Theme.fontTiny
-                                    font.family: Theme.fontFamily
-                                }
+                            // VIP 状态
+                            Text {
+                                text: userPage.userDetail && userPage.userDetail.account && userPage.userDetail.account.vipType > 0 ? "已开通会员" : "未开通会员"
+                                color: userPage.userDetail && userPage.userDetail.account && userPage.userDetail.account.vipType > 0 ? "#D4AF37" : Theme.textTertiary
+                                font.pixelSize: Theme.fontTiny
+                                font.family: Theme.fontFamily
                             }
                         }
                     }
                 }
 
-                // 功能入口
+                // ══ 功能入口 ══
                 Repeater {
                     model: [
-                        { label: "我的歌单", action: "playlists", icon: "📋" },
                         { label: "本地音乐", action: "local", icon: "🎵" },
                         { label: "退出登录", action: "logout", icon: "↩" }
                     ]
 
                     Rectangle {
                         width: parent.width
-                        height: 26
+                        height: 28
                         color: Theme.bgCard
                         radius: Theme.radiusMedium
                         border.color: Theme.borderLight
                         border.width: 0.5
 
-                        scale: funcMouse.pressed ? 0.98 : 1.0
                         Behavior on scale { NumberAnimation { duration: 80 } }
 
                         Row {
@@ -403,8 +371,6 @@ Rectangle {
 
                             Item { width: 1 }
 
-                            Item { width: parent.width - 100 }
-
                             Text {
                                 anchors.verticalCenter: parent.verticalCenter
                                 text: ">"
@@ -414,25 +380,23 @@ Rectangle {
                         }
 
                         MouseArea {
-                            id: funcMouse
                             anchors.fill: parent
+                            onPressedChanged: parent.scale = pressed ? 0.98 : 1.0
                             onClicked: {
                                 if (modelData.action === "local") userPage.openLocal()
                                 else if (modelData.action === "logout") userPage.logout()
-                                else if (modelData.action === "playlists") loadUserPlaylists()
                             }
                         }
                     }
                 }
 
-                // 我的歌单列表
+                // ══ 我的歌单 ══
                 Column {
                     width: parent.width
                     spacing: Theme.spacingSmall
-                    visible: userPage.userPlaylists.length > 0
 
                     Text {
-                        text: "我的歌单"
+                        text: "我的歌单 (" + userPage.userPlaylists.length + ")"
                         color: Theme.textPrimary
                         font.pixelSize: Theme.fontSmall
                         font.bold: true
@@ -441,13 +405,13 @@ Rectangle {
 
                     ListView {
                         width: parent.width
-                        height: Math.min(userPage.userPlaylists.length * 36, 108)
+                        height: Math.min(userPage.userPlaylists.length * 38, 152)
                         clip: true
                         model: userPage.userPlaylists
 
                         delegate: Rectangle {
                             width: parent.width
-                            height: 34
+                            height: 36
                             color: index % 2 === 0 ? Theme.bgCard : Theme.bgSecondary
                             radius: Theme.radiusSmall
 
@@ -456,7 +420,6 @@ Rectangle {
                                 anchors.margins: 6
                                 spacing: 8
 
-                                // 歌单封面
                                 Rectangle {
                                     width: 24
                                     height: 24
@@ -498,12 +461,6 @@ Rectangle {
         }
     }
 
-    function formatListenHours() {
-        var total = userPage.userLevel && userPage.userLevel.listenSongs ? userPage.userLevel.listenSongs : 0
-        var hours = Math.floor(total / 60)
-        return hours + "h"
-    }
-
     function loadUserPlaylists() {
         if (!userPage.userInfo || !userPage.userInfo.userId) return
         userPage.loading = true
@@ -526,17 +483,11 @@ Rectangle {
     function loadUserDetail() {
         if (!userPage.userInfo || !userPage.userInfo.userId) return
         var uid = userPage.userInfo.userId
-        // 加载用户详情
         ApiClient.userDetail(uid, function(d) {
-            if (d.code === 200) {
-                userPage.userDetail = d
-            }
+            if (d.code === 200) userPage.userDetail = d
         }, function(e) { console.log("[user] detail error:", e) })
-        // 加载用户等级
         ApiClient.userLevel(function(d) {
-            if (d.code === 200 && d.data) {
-                userPage.userLevel = d.data
-            }
+            if (d.code === 200 && d.data) userPage.userLevel = d.data
         }, function(e) { console.log("[user] level error:", e) })
     }
 
