@@ -90,6 +90,11 @@ QtObject {
         get("/lyric?id=" + id, onSuccess, onError)
     }
 
+    // 本地歌词：读取与歌曲同目录的同名 .lrc 文件
+    function lyricFile(path, onSuccess, onError) {
+        get("/lyric/file?path=" + encodeURIComponent(path), onSuccess, onError)
+    }
+
     // 歌单详情
     function playlistDetail(id, onSuccess, onError) {
         get("/playlist/detail?id=" + id, onSuccess, onError)
@@ -111,8 +116,8 @@ QtObject {
     }
 
     // 排行榜详情
-    function topListDetail(idx, onSuccess, onError) {
-        get("/top/list?idx=" + idx, onSuccess, onError)
+    function topListDetail(id, onSuccess, onError) {
+        get("/top/list?id=" + id, onSuccess, onError)
     }
 
     // 登录状态

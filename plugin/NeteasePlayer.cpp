@@ -361,6 +361,7 @@ void NeteasePlayer::playWithSystemPlayer(const QString &filePath) {
     typedef bool  (*SetColumnFunc)(void*, const QString&);
     typedef void  (*OnClickedPlayFunc)(void*);
     typedef int   (*PlayStateFunc)(void*);
+    typedef void  (*SetHasLrcFunc)(void*, bool);
 
     // ========== 获取所有系统符号（通过 ELF .symtab 解析） ==========
     InstanceFunc mediaManagerInstance = (InstanceFunc)resolveSymbol("_ZN10YSingletonI13YMediaManagerE8instanceEv");
@@ -373,6 +374,7 @@ void NeteasePlayer::playWithSystemPlayer(const QString &filePath) {
     ShowPlayerFunc showPlayer = (ShowPlayerFunc)resolveSymbol("_ZN7YGlobal15showAudioPlayerEv");
     OnClickedPlayFunc onClickedPlay = (OnClickedPlayFunc)resolveSymbol("_ZN19YMediaPlayerManager13onClickedPlayEv");
     PlayStateFunc playState = (PlayStateFunc)resolveSymbol("_ZNK19YMediaPlayerManager9playStateEv");
+    SetHasLrcFunc setHasLrc = (SetHasLrcFunc)resolveSymbol("_ZN19YMediaPlayerManager9setHasLrcEb");
 
     qDebug() << "[NeteasePlayer] symbols:"
              << "mediaMgrInst=" << (void*)mediaManagerInstance
@@ -430,6 +432,15 @@ void NeteasePlayer::playWithSystemPlayer(const QString &filePath) {
     entity->mDownloadState   = 1;  // DownloadState::SUCCEED (PenMods 枚举值)
     entity->mTitle           = fi.fileName();
     entity->mLocalFile       = filePath;  // mp3 直接用原路径，不需要软链接
+    // 查找同目录同名 .lrc，交给系统播放器显示歌词
+    bool hasLrc = false;
+    {
+        QString lrcPath = fi.absolutePath() + "/" + fi.completeBaseName() + ".lrc";
+        if (QFileInfo::exists(lrcPath)) {
+            entity->mLrcFile = lrcPath;
+            hasLrc = true;
+        }
+    }
     entity->mDuration        = 0;
     entity->mProgress        = 0;
     entity->mSrcAudioVisible = true;
@@ -456,6 +467,10 @@ void NeteasePlayer::playWithSystemPlayer(const QString &filePath) {
             qDebug() << "[NeteasePlayer] step7: not playing, calling onClickedPlay...";
             onClickedPlay(mpm);
             qDebug() << "[NeteasePlayer] step7: onClickedPlay done";
+        }
+        if (setHasLrc) {
+            setHasLrc(mpm, hasLrc);
+            qDebug() << "[NeteasePlayer] step7: setHasLrc =" << hasLrc << "lrc=" << entity->mLrcFile;
         }
     }
 

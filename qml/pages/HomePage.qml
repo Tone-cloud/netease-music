@@ -11,6 +11,7 @@ Rectangle {
     signal backButtonClicked()
     signal openPlaylist(string id)
     signal openSearch()
+    signal openSearchWithKeyword(string kw)
     signal openLogin()
     signal openUser()
     signal openToplist(int idx)
@@ -18,6 +19,7 @@ Rectangle {
     signal openDownload()
     signal openPersonalFM()
     signal playSong(var song)
+    signal showToast(string msg)
 
     property bool isLoggedIn: false
     property string userName: ""
@@ -34,14 +36,6 @@ Rectangle {
         if (count >= 100000000) return (count / 100000000).toFixed(1) + "亿"
         if (count >= 10000) return (count / 10000).toFixed(count >= 100000 ? 0 : 1) + "万"
         return String(count)
-    }
-
-    function recentQuickList() {
-        var list = []
-        for (var i = 0; i < Math.min(homePage.recommendList.length, 4); i++) {
-            list.push(homePage.recommendList[i])
-        }
-        return list
     }
 
     Flickable {
@@ -63,36 +57,29 @@ Rectangle {
             width: parent.width
             spacing: Theme.spacingSmall
 
-            Column {
+            // ── 第一行：快捷入口 ──
+            Row {
                 width: parent.width
                 spacing: Theme.spacingSmall
-
-                Row {
-                    width: parent.width
-                    spacing: Theme.spacingSmall
-                    Repeater {
-                        model: [
-                            { label: "每日推荐", action: "daily", icon: "📅" },
-                            { label: "漫游", action: "roam", icon: "🧭" },
-                            { label: "雷达歌单", action: "radar", icon: "📡" },
-                            { label: "电音专区", action: "electronic", icon: "🎧" }
-                        ]
-                        QuickActionCard {
-                            width: (parent.width - Theme.spacingSmall * 3) / 4
-                            height: 38
-                            icon: modelData.icon
-                            label: modelData.label
-                            onClicked: {
-                                if (modelData.action === "daily") homePage.openPlaylist("daily")
-                                else if (modelData.action === "roam") homePage.openPlaylist("recent")
-                                else if (modelData.action === "radar") homePage.openPersonalFM()
-                                else if (modelData.action === "electronic") homePage.openToplist(0)
-                            }
+                Repeater {
+                    model: [
+                        { label: "每日推荐", action: "daily", icon: "📅" },
+                        { label: "私人FM", action: "fm", icon: "🧭" }
+                    ]
+                    QuickActionCard {
+                        width: (parent.width - Theme.spacingSmall) / 2
+                        height: 38
+                        icon: modelData.icon
+                        label: modelData.label
+                        onClicked: {
+                            if (modelData.action === "daily") homePage.openPlaylist("daily")
+                            else if (modelData.action === "fm") homePage.openPlaylist("fm")
                         }
                     }
                 }
             }
 
+            // ── 第二行：推荐歌单标题 ──
             Row {
                 width: parent.width
                 spacing: 6
@@ -107,6 +94,8 @@ Rectangle {
                 }
                 Item { width: 1 }
                 Text {
+                    width: 52
+                    horizontalAlignment: Text.AlignRight
                     text: homePage.loadingRecommend ? "加载中..." : ""
                     color: Theme.textTertiary
                     font.pixelSize: Theme.fontTiny
@@ -122,24 +111,42 @@ Rectangle {
                     border.width: 0.5
                     anchors.verticalCenter: parent.verticalCenter
                     Text {
+                        id: refreshIcon
                         anchors.centerIn: parent
                         text: "↻"
-                        color: Theme.primary
+                        color: homePage.loadingRecommend ? Theme.primary : Theme.textSecondary
                         font.pixelSize: Theme.fontNormal
                         font.bold: true
                         font.family: Theme.fontFamily
-                        rotation: homePage.loadingRecommend ? 180 : 0
-                        Behavior on rotation { NumberAnimation { duration: 500 } }
+                        transformOrigin: Item.Center
+
+                        NumberAnimation on rotation {
+                            running: homePage.loadingRecommend
+                            loops: Animation.Infinite
+                            from: 0
+                            to: 360
+                            duration: 900
+                        }
+
+                        Connections {
+                            target: homePage
+                            onLoadingRecommendChanged: {
+                                if (!homePage.loadingRecommend) refreshIcon.rotation = 0
+                            }
+                        }
                     }
                     MouseArea {
                         id: refreshMouse
                         anchors.fill: parent
                         anchors.margins: -3
-                        onClicked: homePage.loadRecommend()
+                        onClicked: homePage.loadRecommend(function(ok) {
+                            homePage.showToast(ok ? "推荐内容已刷新" : "刷新失败，请检查网络后重试")
+                        })
                     }
                 }
             }
 
+            // ── 推荐歌单横向滚动 ──
             Flickable {
                 width: parent.width
                 height: 96
@@ -169,68 +176,10 @@ Rectangle {
                     }
                 }
             }
-
-            Column {
-                width: parent.width
-                spacing: Theme.spacingSmall
-                Rectangle {
-                    width: parent.width
-                    height: 24
-                    color: "transparent"
-                    Text {
-                        text: "最近常听"
-                        color: Theme.textPrimary
-                        font.pixelSize: Theme.fontNormal
-                        font.bold: true
-                        font.family: Theme.fontFamily
-                        anchors.verticalCenter: parent.verticalCenter
-                    }
-                }
-                Row {
-                    width: parent.width
-                    spacing: Theme.spacingSmall
-                    Repeater {
-                        model: homePage.recentQuickList()
-                        Rectangle {
-                            width: (parent.width - Theme.spacingSmall * 3) / 4
-                            height: 54
-                            radius: Theme.radiusSmall
-                            color: Theme.bgCard
-                            border.color: Theme.borderLight
-                            border.width: 0.5
-                            clip: true
-                            Column {
-                                anchors.fill: parent
-                                anchors.margins: 6
-                                spacing: 4
-                                Image {
-                                    width: parent.width
-                                    height: 26
-                                    source: modelData.picUrl || ""
-                                    fillMode: Image.PreserveAspectCrop
-                                    asynchronous: true
-                                    cache: true
-                                }
-                                Text {
-                                    text: modelData.name || ""
-                                    color: Theme.textPrimary
-                                    font.pixelSize: Theme.fontTiny
-                                    font.family: Theme.fontFamily
-                                    elide: Text.ElideRight
-                                    width: parent.width
-                                }
-                            }
-                            MouseArea {
-                                anchors.fill: parent
-                                onClicked: if (modelData.id) homePage.openPlaylist(String(modelData.id))
-                            }
-                        }
-                    }
-                }
-            }
         }
     }
 
+    // ── 底部导航栏 ──
     Rectangle {
         id: tabBar
         width: parent.width
@@ -325,20 +274,27 @@ Rectangle {
         }
     }
 
-    function loadRecommend() {
+    function loadRecommend(cb) {
         if (homePage.loadingRecommend) return
         homePage.loadingRecommend = true
         ApiClient.recommend(function(d) {
             homePage.loadingRecommend = false
-            if (d.code === 200) {
+            if (d && d.code === 200) {
                 var list = d.recommend || d.playlists || []
                 homePage.recommendList = list.slice(0, 12)
+                if (cb) cb(true)
+            } else {
+                console.log("[home] 推荐歌单返回异常:", JSON.stringify(d))
+                if (cb) cb(false)
             }
         }, function(e) {
             homePage.loadingRecommend = false
             console.log("[home] 推荐歌单加载失败:", e)
+            if (cb) cb(false)
         })
     }
 
-    Component.onCompleted: loadRecommend()
+    Component.onCompleted: {
+        loadRecommend()
+    }
 }

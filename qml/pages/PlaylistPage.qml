@@ -1,4 +1,4 @@
-import QtQuick 2.12
+﻿import QtQuick 2.12
 import "../components"
 
 Rectangle {
@@ -302,53 +302,74 @@ Rectangle {
         delegate: Rectangle {
             id: songItem
             width: parent.width
-            height: 42
-            radius: Theme.radiusSmall
+            height: 46
+            radius: Theme.radiusMedium
             color: songMouse.pressed ? Theme.bgCardHover : (index % 2 === 0 ? Theme.bgPrimary : Theme.bgCard)
-            anchors.leftMargin: 6
-            anchors.rightMargin: 6
+            anchors.leftMargin: 4
+            anchors.rightMargin: 4
+            border.color: Theme.borderLight
+            border.width: 0.3
 
             Behavior on color { ColorAnimation { duration: 80 } }
 
             Row {
                 anchors.fill: parent
-                anchors.leftMargin: 8
-                anchors.rightMargin: 8
-                spacing: 8
+                anchors.leftMargin: 10
+                anchors.rightMargin: 10
+                spacing: 10
 
+                // 序号
                 Text {
                     anchors.verticalCenter: parent.verticalCenter
                     text: index + 1
                     color: index < 3 ? Theme.primary : Theme.textTertiary
-                    font.pixelSize: Theme.fontTiny
+                    font.pixelSize: Theme.fontSmall
                     font.family: Theme.fontFamily
                     font.bold: index < 3
-                    width: 16
+                    width: 18
                     horizontalAlignment: Text.AlignHCenter
                 }
 
+                // 封面
                 Rectangle {
-                    width: 28
-                    height: 28
-                    radius: 6
+                    width: 32
+                    height: 32
+                    radius: 8
                     clip: true
                     color: Theme.bgTertiary
                     anchors.verticalCenter: parent.verticalCenter
+
                     Image {
                         anchors.fill: parent
                         source: modelData.cover || ""
                         fillMode: Image.PreserveAspectCrop
                         asynchronous: true
                         cache: true
-                        sourceSize.width: 56
-                        sourceSize.height: 56
+                        sourceSize.width: 64
+                        sourceSize.height: 64
+                    }
+
+                    // 已下载标记
+                    Rectangle {
+                        width: 10
+                        height: 10
+                        radius: 5
+                        color: Theme.primary
+                        anchors.right: parent.right
+                        anchors.bottom: parent.bottom
+                        anchors.rightMargin: -2
+                        anchors.bottomMargin: -2
+                        visible: modelData.downloaded === true
+                        border.color: Theme.bgCard
+                        border.width: 1
                     }
                 }
 
+                // 歌曲信息
                 Column {
                     anchors.verticalCenter: parent.verticalCenter
-                    width: parent.width - 16 - 28 - 8 - 24 - 12
-                    spacing: 0
+                    width: parent.width - 18 - 32 - 10 - 26 - 20
+                    spacing: 2
 
                     Text {
                         text: modelData.name
@@ -370,17 +391,23 @@ Rectangle {
                     }
                 }
 
+                // 播放按钮
                 Rectangle {
-                    width: 22
-                    height: 22
-                    radius: 11
+                    width: 24
+                    height: 24
+                    radius: 12
                     color: playBtnMouse.pressed ? Theme.primaryDark : Theme.primary
                     anchors.verticalCenter: parent.verticalCenter
+
+                    scale: playBtnMouse.pressed ? 0.9 : 1.0
+                    Behavior on scale { NumberAnimation { duration: 80 } }
+
                     Text {
                         anchors.centerIn: parent
                         text: "▶"
                         color: "white"
-                        font.pixelSize: 7
+                        font.pixelSize: 8
+                        font.bold: true
                     }
                     MouseArea {
                         id: playBtnMouse
@@ -431,6 +458,16 @@ Rectangle {
         } else if (id === "fm") {
             playlistPage.playlistName = "私人FM"
             loadFMTracks(0, [])
+        } else if (id.indexOf("top_") === 0) {
+            ApiClient.topListDetail(id.substring(4), function(d) {
+                playlistPage.loading = false
+                if (d.code === 200 && d.playlist) {
+                    playlistPage.playlistName = d.playlist.name
+                    playlistPage.coverImgUrl = d.playlist.coverImgUrl || d.playlist.picUrl || ""
+                    playlistPage.playCount = d.playlist.playCount || 0
+                    parseSongs(d.playlist.tracks || [])
+                }
+            }, function(e) { playlistPage.loading = false })
         } else {
             ApiClient.playlistDetail(id, function(d) {
                 playlistPage.loading = false

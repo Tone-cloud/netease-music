@@ -15,6 +15,7 @@ Rectangle {
     property string searchText: ""
     property bool searching: false
     property var searchHistory: []
+    property string initialKeyword: `"`
 
     // 页面加载时从本地存储读取搜索历史
     Component.onCompleted: {
