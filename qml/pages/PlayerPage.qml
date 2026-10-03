@@ -4,7 +4,7 @@ import "../components"
 
 /**
  * 播放器页面
- * 功能：歌曲播放、歌词显示、听歌记录提交、下载
+ * 功能：歌曲播放、听歌记录提交、下载
  */
 Rectangle {
     id: playerPage
@@ -24,12 +24,6 @@ Rectangle {
     property var currentSong: null
     property var playlist: []       // 播放列表
     property int currentIndex: 0    // 当前播放索引
-    property string lyricText: ""
-    property var lyricLines: []
-    property int lyricIndex: -1
-    property string lyricSource: ""     // 本地歌词 / 在线歌词
-    property int lyricPos: 0            // 估算的播放进度（毫秒）
-    property double playStartMs: 0      // 实际开始播放的时间戳（毫秒）
     property bool loadingUrl: false
     property string playUrl: ""
     property bool caching: false
@@ -62,16 +56,10 @@ Rectangle {
     function resetPlaybackState() {
         playerPage.playStarted = false
         playerPage.playStartTime = 0
-        playerPage.playStartMs = 0
         playerPage.lastSongId = null
         playerPage.caching = false
         playerPage.loadingUrl = false
         playerPage.playUrl = ""
-        playerPage.lyricText = ""
-        playerPage.lyricLines = []
-        playerPage.lyricIndex = -1
-        playerPage.lyricSource = ""
-        playerPage.lyricPos = 0
     }
 
     // ── 播放器信号监听 ──
@@ -83,7 +71,6 @@ Rectangle {
                 playerPage.setPlayState("playing", "已通过系统播放器播放")
                 if (!playerPage.playStarted) {
                     playerPage.playStartTime = Math.floor(Date.now() / 1000)
-                    playerPage.playStartMs = Date.now()
                     playerPage.playStarted = true
                     console.log("[scrobble] 实际开始播放:", playerPage.currentSong.name)
                 }
@@ -159,115 +146,12 @@ Rectangle {
         playerPage.loadingUrl = false
         playerPage.caching = false
         playerPage.setPlayState("loading", "正在打开本地歌曲...")
-        lyricText = ""
-        lyricLines = []
-        lyricIndex = -1
 
         if (!player) {
             playerPage.setPlayState("error", "播放器初始化失败")
             return
         }
         player.play(currentSong.localPath)
-        loadLyric(currentSong.id)
-    }
-
-    // ======================================================================
-    // 歌词相关函数
-    // ======================================================================
-
-    /**
-     * 加载歌词：优先读取与歌曲同目录的同名 .lrc 文件，读不到再走在线歌词
-     */
-    function loadLyric(id) {
-        var localPath = currentSong && currentSong.localLrcPath ? currentSong.localLrcPath : ""
-        if (!localPath && currentSong && currentSong.localPath) {
-            localPath = currentSong.localPath.replace(/\.[^.]+$/, ".lrc")
-        }
-        if (localPath) {
-            ApiClient.lyricFile(localPath, function(d) {
-                if (d && d.code === 200 && d.lyric && d.lyric.length > 0) {
-                    parseLyric(d.lyric)
-                    playerPage.lyricSource = "本地歌词"
-                    console.log("[PlayerPage] 使用本地歌词:", d.path)
-                } else {
-                    fetchOnlineLyric(id)
-                }
-            }, function(e) {
-                console.log("[PlayerPage] 本地歌词不可用，改用在线歌词:", e)
-                fetchOnlineLyric(id)
-            })
-        } else {
-            fetchOnlineLyric(id)
-        }
-    }
-
-    /**
-     * 在线歌词（没有本地 lrc 时兜底）
-     */
-    function fetchOnlineLyric(id) {
-        ApiClient.lyric(id, function(d) {
-            if (d && d.code === 200 && d.lrc && d.lrc.lyric) {
-                parseLyric(d.lrc.lyric)
-                playerPage.lyricSource = "在线歌词"
-            } else {
-                playerPage.lyricSource = ""
-            }
-        }, function(e) {
-            playerPage.lyricSource = ""
-            console.log("[PlayerPage] 在线歌词加载失败:", e)
-        })
-    }
-
-    /**
-     * 解析 LRC 格式歌词
-     */
-    function parseLyric(lrc) {
-        playerPage.lyricIndex = -1
-        playerPage.lyricText = ""
-        playerPage.lyricPos = 0
-        var lines = lrc.split("\n")
-        var result = []
-        for (var i = 0; i < lines.length; i++) {
-            var m = lines[i].match(/\[(\d+):(\d+)\.(\d+)\](.*)/)
-            if (m) {
-                var t = parseInt(m[1]) * 60000
-                        + parseInt(m[2]) * 1000
-                        + parseInt(m[3]) * 10
-                result.push({ time: t, text: m[4].trim() })
-            }
-        }
-        result.sort(function(a, b) { return a.time - b.time })
-        playerPage.lyricLines = result
-    }
-
-    /**
-     * 根据播放位置更新当前歌词
-     */
-    function updateLyric(pos) {
-        if (lyricLines.length === 0) return
-        for (var i = lyricLines.length - 1; i >= 0; i--) {
-            if (pos >= lyricLines[i].time) {
-                if (i !== lyricIndex) {
-                    lyricIndex = i
-                    lyricText = lyricLines[i].text
-                }
-                break
-            }
-        }
-    }
-
-    // 系统播放器不提供播放进度，按实际开始播放时间估算歌词滚动
-    Timer {
-        id: lyricTimer
-        interval: 250
-        repeat: true
-        running: playerPage.playState === "playing" && playerPage.lyricLines.length > 0
-        onTriggered: {
-            if (playerPage.playStartMs > 0) {
-                playerPage.lyricPos = Math.floor(Date.now() - playerPage.playStartMs)
-                playerPage.updateLyric(playerPage.lyricPos)
-            }
-        }
     }
 
     // ======================================================================
@@ -535,7 +419,7 @@ Rectangle {
         }
     }
 
-    // ── 主内容区：歌曲信息 + 歌词 ──
+    // ── 主内容区：歌曲信息 ──
     Column {
         id: contentColumn
         anchors.top: topBar.bottom
@@ -548,7 +432,7 @@ Rectangle {
         // 歌曲信息卡片
         Rectangle {
             width: parent.width
-            height: 56
+            height: 72
             color: Theme.bgCard
             radius: Theme.radiusMedium
             border.color: Theme.borderLight
@@ -561,8 +445,8 @@ Rectangle {
 
                 // 专辑封面
                 Rectangle {
-                    width: 40
-                    height: 40
+                    width: 52
+                    height: 52
                     radius: Theme.radiusSmall
                     color: Theme.bgTertiary
                     anchors.verticalCenter: parent.verticalCenter
@@ -587,7 +471,7 @@ Rectangle {
                 // 歌曲信息（歌名/歌手/专辑）
                 Column {
                     anchors.verticalCenter: parent.verticalCenter
-                    width: parent.width - 56
+                    width: parent.width - 68
                     spacing: 2
 
                     Text {
@@ -650,82 +534,8 @@ Rectangle {
             }
         }
 
-        // 歌词显示区域
-        Rectangle {
-            width: parent.width
-            height: parent.height - 80
-            color: Theme.bgCard
-            radius: Theme.radiusMedium
-            border.color: Theme.borderLight
-            border.width: 0.5
-            visible: !playerPage.caching && !playerPage.loadingUrl
-
-            Column {
-                id: lyricColumn
-                anchors.centerIn: parent
-                width: parent.width - 20
-                spacing: 6
-                visible: playerPage.lyricLines.length > 0
-
-                Text {
-                    width: parent.width
-                    text: playerPage.lyricText.length > 0
-                          ? playerPage.lyricText
-                          : (playerPage.lyricLines.length > 0 && playerPage.lyricLines[0] ? playerPage.lyricLines[0].text : "♪")
-                    color: Theme.primary
-                    font.pixelSize: Theme.fontNormal
-                    font.bold: true
-                    font.family: Theme.fontFamily
-                    horizontalAlignment: Text.AlignHCenter
-                    wrapMode: Text.WordWrap
-                    maximumLineCount: 2
-                    elide: Text.ElideRight
-                }
-
-                Text {
-                    width: parent.width
-                    visible: playerPage.lyricIndex >= 0 && playerPage.lyricIndex + 1 < playerPage.lyricLines.length
-                    text: (playerPage.lyricIndex >= 0 && playerPage.lyricIndex + 1 < playerPage.lyricLines.length)
-                          ? playerPage.lyricLines[playerPage.lyricIndex + 1].text : ""
-                    color: Theme.textTertiary
-                    font.pixelSize: Theme.fontTiny
-                    font.family: Theme.fontFamily
-                    horizontalAlignment: Text.AlignHCenter
-                    wrapMode: Text.WordWrap
-                    maximumLineCount: 1
-                    elide: Text.ElideRight
-                }
-
-                Text {
-                    width: parent.width
-                    text: playerPage.lyricSource.length > 0
-                          ? (playerPage.lyricSource + " · " + (playerPage.lyricIndex + 1) + "/" + playerPage.lyricLines.length)
-                          : ""
-                    color: Theme.textTertiary
-                    font.pixelSize: Theme.fontTiny
-                    font.family: Theme.fontFamily
-                    horizontalAlignment: Text.AlignHCenter
-                }
-            }
-
-            Text {
-                id: lyricDisplay
-                anchors.centerIn: parent
-                anchors.leftMargin: 10
-                anchors.rightMargin: 10
-                visible: playerPage.lyricLines.length === 0
-                text: lyricText || statusText.text || "暂无歌词\n已下载歌曲会自动读取同目录同名 .lrc"
-                color: Theme.textSecondary
-                font.pixelSize: Theme.fontSmall
-                font.family: Theme.fontFamily
-                horizontalAlignment: Text.AlignHCenter
-                verticalAlignment: Text.AlignVCenter
-                wrapMode: Text.WordWrap
-                width: parent.width - 20
-            }
-        }
     }
 
-    // 隐藏的状态文本（用于歌词后备显示）
+    // 隐藏的状态文本（用于显示播放状态提示）
     Text { id: statusText; visible: false; text: "就绪" }
 }

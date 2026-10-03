@@ -201,6 +201,80 @@ func writeDownloadedSongMetadata(id, name, artist, audioPath string) error {
 	return os.WriteFile(metadataPath, data, 0644)
 }
 
+// readLocalSongID 读取音频同名 .json 元数据里的歌曲 id（读不到返回空串）
+func readLocalSongID(audioPath string) string {
+	metadataPath := strings.TrimSuffix(audioPath, filepath.Ext(audioPath)) + ".json"
+	data, err := os.ReadFile(metadataPath)
+	if err != nil {
+		return ""
+	}
+	var meta struct {
+		ID string `json:"id"`
+	}
+	if json.Unmarshal(data, &meta) != nil {
+		return ""
+	}
+	return meta.ID
+}
+
+// flattenLegacySongFolders 把历史遗留的「单曲独立目录」里的文件搬回音乐根目录。
+// 旧版单曲下载会建 /userdisk/Music/netease/<歌名>/<歌名>.mp3，
+// 导致多首单曲分属不同目录，播放器无法连续播放。
+// 只处理「目录里只有这一首歌」的情况，批量下载的<歌单名>目录不会被动到。
+func flattenLegacySongFolders() {
+	entries, err := os.ReadDir(musicDir)
+	if err != nil {
+		return
+	}
+	moved := 0
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		dir := filepath.Join(musicDir, e.Name())
+		if filepath.Clean(dir) == filepath.Clean(cacheDir) {
+			continue
+		}
+		files, err := os.ReadDir(dir)
+		if err != nil {
+			continue
+		}
+		// 目录里必须存在与目录同名的音频，且没有第二首歌
+		srcAudio := filepath.Join(dir, e.Name()+".mp3")
+		if fi, err := os.Stat(srcAudio); err != nil || fi.IsDir() {
+			continue
+		}
+		single := true
+		for _, f := range files {
+			if strings.ToLower(filepath.Ext(f.Name())) == ".mp3" && f.Name() != e.Name()+".mp3" {
+				single = false
+				break
+			}
+		}
+		if !single {
+			continue
+		}
+		destBase := filepath.Join(musicDir, e.Name())
+		if _, err := os.Stat(destBase + ".mp3"); err == nil {
+			continue // 根目录已有同名文件，跳过避免覆盖
+		}
+		for _, ext := range []string{".mp3", ".lrc", ".json"} {
+			src := filepath.Join(dir, e.Name()+ext)
+			if _, err := os.Stat(src); err != nil {
+				continue
+			}
+			if err := os.Rename(src, destBase+ext); err != nil {
+				fmt.Printf("[flatten] 移动失败 %s: %v\n", src, err)
+			}
+		}
+		os.Remove(dir) // 空目录才删得掉，非空忽略
+		moved++
+	}
+	if moved > 0 {
+		fmt.Printf("[flatten] 已归并 %d 首单曲到 %s\n", moved, musicDir)
+	}
+}
+
 func getBatchStatus() BatchStatus {
 	batchMu.Lock()
 	defer batchMu.Unlock()
@@ -250,6 +324,8 @@ func init() {
 	}
 	os.MkdirAll(cacheDir, 0755)
 	os.MkdirAll(musicDir, 0755)
+	// 历史单曲目录归并到音乐根目录，保证同一目录可连续播放
+	go flattenLegacySongFolders()
 	// 异步清理超过 7 天的缓存文件
 	go cleanOldCache()
 	// 读取 cookies.json（登录状态）
@@ -897,12 +973,22 @@ func handleDownload(w http.ResponseWriter, r *http.Request) {
 	if safeName == "" {
 		safeName = id
 	}
-	targetDir := filepath.Join(musicDir, safeName)
+	// 单曲统一放在 /userdisk/Music/netease 根目录（与批量下载同处一个目录），
+	// 这样词典笔播放器里多首单曲属于同一个目录，可以连续播放/切换。
+	targetDir := musicDir
 	if err := os.MkdirAll(targetDir, 0755); err != nil {
 		writeError(w, "创建目录失败: "+err.Error())
 		return
 	}
 	dlFile := filepath.Join(targetDir, safeName+".mp3")
+	if existID := readLocalSongID(dlFile); existID != "" && existID != id {
+		// 同名不同曲：用「歌名 - 歌手」区分，避免互相覆盖
+		alt := sanitizeFilename(name + " - " + artist)
+		if alt == "" || alt == safeName {
+			alt = safeName + " - " + id
+		}
+		dlFile = filepath.Join(targetDir, alt+".mp3")
+	}
 	lrcFile := strings.TrimSuffix(dlFile, filepath.Ext(dlFile)) + ".lrc"
 	if _, err := os.Stat(dlFile); err == nil {
 		if includeLrc {
