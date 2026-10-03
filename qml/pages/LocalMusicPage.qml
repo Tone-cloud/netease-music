@@ -13,7 +13,9 @@ Rectangle {
     signal loaded(var item)
 
     property var files: []
-    property var rows: []          // 按歌单（目录）分组后的显示数据
+    property var groups: []        // 按歌单（目录）分组后的数据
+    property var expanded: ({})    // 哪些分组被展开（默认全部折叠）
+    property var rows: []          // 实际显示的列表（标题行 + 展开组内的歌曲）
     property bool loading: false
     property string selectedPath: ""
 
@@ -164,7 +166,7 @@ Rectangle {
 
                 Text {
                     anchors.verticalCenter: parent.verticalCenter
-                    text: "▸"
+                    text: modelData.expanded === true ? "▾" : "▸"
                     color: Theme.primary
                     font.pixelSize: Theme.fontTiny
                 }
@@ -277,8 +279,10 @@ Rectangle {
             MouseArea {
                 id: fileMouse
                 anchors.fill: parent
-                enabled: modelData.isHeader !== true
-                onClicked: localPage.playLocal(modelData)
+                onClicked: {
+                    if (modelData.isHeader === true) localPage.toggleGroup(modelData.folder)
+                    else localPage.playLocal(modelData)
+                }
             }
         }
     }
@@ -378,7 +382,8 @@ Rectangle {
             localPage.loading = false
             if (d.code === 200 && d.files) {
                 localPage.files = d.files
-                localPage.rows = localPage.buildRows(d.files)
+                localPage.groups = localPage.buildGroups(d.files)
+                localPage.rows = localPage.buildRows()
             }
         }, function(e) {
             localPage.loading = false
@@ -396,7 +401,7 @@ Rectangle {
     }
 
     // 按目录（歌单）分组，组内按下载时记录的歌单顺序（index）排列
-    function buildRows(files) {
+    function buildGroups(files) {
         var groups = ({})
         var order = []
         for (var i = 0; i < files.length; i++) {
@@ -425,14 +430,36 @@ Rectangle {
                 if (ka !== kb) return ka - kb
                 return String(a.name).localeCompare(String(b.name))
             })
-            rows.push({ isHeader: true, title: localPage.folderTitle(key2), count: arr.length, folder: key2 })
-            for (var j = 0; j < arr.length; j++) {
-                var item = arr[j]
+            rows.push({ key: key2, title: localPage.folderTitle(key2), songs: arr, count: arr.length })
+        }
+        return rows
+    }
+
+    // 根据展开状态生成显示列表：默认只显示各歌单标题（折叠），点标题才展开
+    function buildRows() {
+        var rows = []
+        for (var g = 0; g < localPage.groups.length; g++) {
+            var grp = localPage.groups[g]
+            var open = localPage.expanded[grp.key] === true
+            rows.push({ isHeader: true, title: grp.title, count: grp.count,
+                        folder: grp.key, expanded: open })
+            if (!open) continue
+            for (var j = 0; j < grp.songs.length; j++) {
+                var item = grp.songs[j]
                 item.isHeader = false
                 rows.push(item)
             }
         }
         return rows
+    }
+
+    // 展开/折叠一个歌单分组
+    function toggleGroup(key) {
+        var next = ({})
+        for (var k in localPage.expanded) next[k] = localPage.expanded[k]
+        next[key] = !(localPage.expanded[key] === true)
+        localPage.expanded = next
+        localPage.rows = localPage.buildRows()
     }
 
     function deleteFile(path) {
