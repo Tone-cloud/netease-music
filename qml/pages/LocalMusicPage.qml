@@ -13,6 +13,7 @@ Rectangle {
     signal loaded(var item)
 
     property var files: []
+    property var rows: []          // 按歌单（目录）分组后的显示数据
     property bool loading: false
     property string selectedPath: ""
 
@@ -142,17 +143,54 @@ Rectangle {
         clip: true
         cacheBuffer: 200
         visible: localPage.files.length > 0
-        model: localPage.files
+        model: localPage.rows
 
         delegate: Rectangle {
             width: fileList.width
-            height: 32
-            color: index % 2 === 0 ? Theme.bgPrimary : Theme.bgCard
+            height: modelData.isHeader === true ? 26 : 32
+            color: modelData.isHeader === true ? Theme.bgSecondary
+                                               : (index % 2 === 0 ? Theme.bgPrimary : Theme.bgCard)
 
             scale: fileMouse.pressed ? 0.98 : 1.0
             Behavior on scale { NumberAnimation { duration: 60 } }
 
+            // 歌单分组标题
             Row {
+                visible: modelData.isHeader === true
+                anchors.fill: parent
+                anchors.leftMargin: 10
+                anchors.rightMargin: 10
+                spacing: 6
+
+                Text {
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: "▸"
+                    color: Theme.primary
+                    font.pixelSize: Theme.fontTiny
+                }
+
+                Text {
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: modelData.title || ""
+                    color: Theme.textPrimary
+                    font.pixelSize: Theme.fontSmall
+                    font.bold: true
+                    font.family: Theme.fontFamily
+                    elide: Text.ElideRight
+                    width: parent.width - 60
+                }
+
+                Text {
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: (modelData.count || 0) + " 首"
+                    color: Theme.textTertiary
+                    font.pixelSize: Theme.fontTiny
+                    font.family: Theme.fontFamily
+                }
+            }
+
+            Row {
+                visible: modelData.isHeader !== true
                 anchors.fill: parent
                 anchors.leftMargin: 10
                 anchors.rightMargin: 10
@@ -239,6 +277,7 @@ Rectangle {
             MouseArea {
                 id: fileMouse
                 anchors.fill: parent
+                enabled: modelData.isHeader !== true
                 onClicked: localPage.playLocal(modelData)
             }
         }
@@ -339,11 +378,61 @@ Rectangle {
             localPage.loading = false
             if (d.code === 200 && d.files) {
                 localPage.files = d.files
+                localPage.rows = localPage.buildRows(d.files)
             }
         }, function(e) {
             localPage.loading = false
             console.log("[local] 扫描失败:", e)
         })
+    }
+
+    // 分组标题：取目录最后一段；netease 根目录归为「单曲」
+    function folderTitle(folder) {
+        if (!folder || folder.length === 0) return "本地音乐"
+        var parts = String(folder).split("/")
+        var last = parts[parts.length - 1]
+        if (last === "netease") return "单曲 / 未分类"
+        return last
+    }
+
+    // 按目录（歌单）分组，组内按下载时记录的歌单顺序（index）排列
+    function buildRows(files) {
+        var groups = ({})
+        var order = []
+        for (var i = 0; i < files.length; i++) {
+            var f = files[i]
+            var key = f.folder || ""
+            if (!groups[key]) {
+                groups[key] = []
+                order.push(key)
+            }
+            groups[key].push(f)
+        }
+        order.sort(function(a, b) {
+            var ra = (a === "" || a === "netease") ? 0 : 1
+            var rb = (b === "" || b === "netease") ? 0 : 1
+            if (ra !== rb) return ra - rb
+            return String(a).localeCompare(String(b))
+        })
+        var rows = []
+        for (var g = 0; g < order.length; g++) {
+            var key2 = order[g]
+            var arr = groups[key2]
+            // 有歌单顺序用顺序；老文件没有顺序则按下载时间（modTime）排
+            arr.sort(function(a, b) {
+                var ka = (a.index && a.index > 0) ? a.index : (1000000 + (a.modTime || 0))
+                var kb = (b.index && b.index > 0) ? b.index : (1000000 + (b.modTime || 0))
+                if (ka !== kb) return ka - kb
+                return String(a.name).localeCompare(String(b.name))
+            })
+            rows.push({ isHeader: true, title: localPage.folderTitle(key2), count: arr.length, folder: key2 })
+            for (var j = 0; j < arr.length; j++) {
+                var item = arr[j]
+                item.isHeader = false
+                rows.push(item)
+            }
+        }
+        return rows
     }
 
     function deleteFile(path) {

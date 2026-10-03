@@ -118,7 +118,7 @@ func startBatchDownload(tasks []BatchTask) {
 			batchMu.Unlock()
 
 			// 执行下载
-			err := downloadSong(task.ID, task.Name, task.Artist, task.Folder)
+			err := downloadSong(task.ID, task.Name, task.Artist, task.Folder, batchIdx+1)
 			batchMu.Lock()
 			if err != nil {
 				if strings.Contains(err.Error(), "已存在") {
@@ -136,7 +136,7 @@ func startBatchDownload(tasks []BatchTask) {
 	}()
 }
 
-func downloadSong(id int64, name, artist, folder string) error {
+func downloadSong(id int64, name, artist, folder string, trackIndex int) error {
 	safeName := sanitizeFilename(name)
 	if safeName == "" {
 		safeName = fmt.Sprintf("%d", id)
@@ -150,7 +150,7 @@ func downloadSong(id int64, name, artist, folder string) error {
 	lrcFile := strings.TrimSuffix(dlFile, filepath.Ext(dlFile)) + ".lrc"
 	// 检查是否已下载
 	if _, err := os.Stat(dlFile); err == nil {
-		writeDownloadedSongMetadata(fmt.Sprintf("%d", id), name, artist, dlFile)
+		writeDownloadedSongMetadata(fmt.Sprintf("%d", id), name, artist, dlFile, trackIndex)
 		// 已下载过的歌曲补齐缺失的同名歌词
 		if err := ensureLyricFile(fmt.Sprintf("%d", id), lrcFile); err != nil {
 			fmt.Printf("[batch] 歌词补齐失败 %s: %v\n", name, err)
@@ -177,7 +177,7 @@ func downloadSong(id int64, name, artist, folder string) error {
 	if err := downloadFile(songUrl, dlFile); err != nil {
 		return err
 	}
-	if err := writeDownloadedSongMetadata(fmt.Sprintf("%d", id), name, artist, dlFile); err != nil {
+	if err := writeDownloadedSongMetadata(fmt.Sprintf("%d", id), name, artist, dlFile, trackIndex); err != nil {
 		return err
 	}
 	// 同时下载同名歌词文件，放在与音频相同的目录
@@ -187,11 +187,12 @@ func downloadSong(id int64, name, artist, folder string) error {
 	return nil
 }
 
-func writeDownloadedSongMetadata(id, name, artist, audioPath string) error {
+func writeDownloadedSongMetadata(id, name, artist, audioPath string, trackIndex int) error {
 	metadata := map[string]interface{}{
 		"id":     id,
 		"name":   name,
 		"artist": artist,
+		"index":  trackIndex,
 	}
 	data, err := json.Marshal(metadata)
 	if err != nil {
@@ -1033,7 +1034,7 @@ func handleDownload(w http.ResponseWriter, r *http.Request) {
 			lrcOK = true
 		}
 	}
-	if err := writeDownloadedSongMetadata(id, name, artist, dlFile); err != nil {
+	if err := writeDownloadedSongMetadata(id, name, artist, dlFile, 0); err != nil {
 		fmt.Printf("[download] metadata write failed: %v\n", err)
 	}
 	updateTransferStatus("download", filepath.Base(dlFile), 1, 1, false, "")
@@ -1234,6 +1235,20 @@ func handleLocalList(w http.ResponseWriter, r *http.Request) {
 			} else {
 				lrcPath = ""
 			}
+			// 读取下载时写入的元数据（歌单内顺序、歌手）
+			var metadata struct {
+				Artist string `json:"artist"`
+				Index  int    `json:"index"`
+			}
+			if data, readErr := os.ReadFile(strings.TrimSuffix(path, filepath.Ext(path)) + ".json"); readErr == nil {
+				json.Unmarshal(data, &metadata)
+			}
+			// 所属目录（相对 /userdisk/Music），本地音乐页按它分组显示歌单
+			folder, relErr := filepath.Rel(localMusicRoot, filepath.Dir(path))
+			if relErr != nil || folder == "." {
+				folder = ""
+			}
+			folder = filepath.ToSlash(folder)
 			list = append(list, map[string]interface{}{
 				"name":    strings.TrimSuffix(info.Name(), ext),
 				"path":    path,
@@ -1243,6 +1258,9 @@ func handleLocalList(w http.ResponseWriter, r *http.Request) {
 				"ext":     ext,
 				"lrc":     lrcOK,
 				"lrcPath": lrcPath,
+				"artist":  metadata.Artist,
+				"index":   metadata.Index,
+				"folder":  folder,
 			})
 		}
 		return nil
