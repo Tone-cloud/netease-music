@@ -32,7 +32,9 @@ Rectangle {
             if (!t && userPage.userDetail.account) t = userPage.userDetail.account.vipType || 0
         }
         if (!t && userPage.userInfo) t = userPage.userInfo.vipType || 0
-        if (t >= 11 || lv >= 2 || redLv >= 2) return "黑胶SVIP"
+        // vipType: 10/11 = 黑胶VIP，12 及以上才是黑胶SVIP
+        // （旧判断用 vipType>=11，会把只有黑胶VIP的账号误显示成黑胶SVIP）
+        if (t >= 12) return "黑胶SVIP"
         if (t > 0 || lv > 0 || redLv > 0 || assoc) return "黑胶VIP"
         return ""
     }
