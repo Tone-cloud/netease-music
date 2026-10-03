@@ -189,11 +189,22 @@ Rectangle {
                         elide: Text.ElideRight
                         width: parent.width
                     }
-                    Text {
-                        text: modelData.sizeStr + "  " + modelData.ext.toUpperCase()
-                        color: Theme.textTertiary
-                        font.pixelSize: Theme.fontTiny
-                        font.family: Theme.fontFamily
+                    Row {
+                        spacing: 4
+                        Text {
+                            text: modelData.sizeStr + "  " + modelData.ext.toUpperCase()
+                            color: Theme.textTertiary
+                            font.pixelSize: Theme.fontTiny
+                            font.family: Theme.fontFamily
+                        }
+                        Text {
+                            visible: modelData.lrc === true
+                            text: "词"
+                            color: Theme.primary
+                            font.pixelSize: Theme.fontTiny
+                            font.bold: true
+                            font.family: Theme.fontFamily
+                        }
                     }
                 }
 
