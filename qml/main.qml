@@ -251,13 +251,27 @@ Rectangle {
             anchors.fill: parent
             sourceComponent: Component {
                 Pages.PlayerPage {
+                    id: playerPage
                     player: root.globalPlayer
                     currentSong: root.currentSong
                     playlist: root.playlist
                     currentIndex: root.currentIndex
                     onBackClicked: root.goBack()
-                    onPrevSong: root.playPrev()
-                    onNextSong: root.playNext()
+                    onPrevSong: {
+                        if (playerPage.playState === "playing") playerPage.autoPlayNext = true
+                        root.playPrev()
+                    }
+                    onNextSong: {
+                        // 正在播放时按下一首，切过去后继续播放
+                        if (playerPage.playState === "playing") playerPage.autoPlayNext = true
+                        root.playNext()
+                    }
+                    onAutoNext: {
+                        if (!root.playNextDownloaded()) {
+                            playerPage.autoPlayNext = false
+                            playerPage.setPlayState("idle", "本歌单已播放完毕")
+                        }
+                    }
                     onDownloadRequested: function(song, withLyrics) { root.downloadSong(song, withLyrics) }
                 }
             }
@@ -452,6 +466,23 @@ Rectangle {
         s.localPath = root.localPathForSong(s)
         s.downloaded = s.localPath !== ""
         currentSong = s
+    }
+
+    // 自动续播：按歌单顺序找下一首「已下载」的歌；找到返回 true
+    function playNextDownloaded() {
+        if (playlist.length === 0) return false
+        for (var idx = currentIndex + 1; idx < playlist.length; idx++) {
+            var s = playlist[idx]
+            var p = root.localPathForSong(s)
+            if (p && p !== "") {
+                s.localPath = p
+                s.downloaded = true
+                currentIndex = idx
+                currentSong = s
+                return true
+            }
+        }
+        return false
     }
 
     function playPrev() {

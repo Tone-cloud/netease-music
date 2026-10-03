@@ -362,6 +362,7 @@ void NeteasePlayer::playWithSystemPlayer(const QString &filePath) {
     typedef void  (*OnClickedPlayFunc)(void*);
     typedef int   (*PlayStateFunc)(void*);
     typedef void  (*SetHasLrcFunc)(void*, bool);
+    typedef void  (*CloseRepeatFunc)(void*);
 
     // ========== 获取所有系统符号（通过 ELF .symtab 解析） ==========
     InstanceFunc mediaManagerInstance = (InstanceFunc)resolveSymbol("_ZN10YSingletonI13YMediaManagerE8instanceEv");
@@ -375,6 +376,7 @@ void NeteasePlayer::playWithSystemPlayer(const QString &filePath) {
     OnClickedPlayFunc onClickedPlay = (OnClickedPlayFunc)resolveSymbol("_ZN19YMediaPlayerManager13onClickedPlayEv");
     PlayStateFunc playState = (PlayStateFunc)resolveSymbol("_ZNK19YMediaPlayerManager9playStateEv");
     SetHasLrcFunc setHasLrc = (SetHasLrcFunc)resolveSymbol("_ZN19YMediaPlayerManager9setHasLrcEb");
+    CloseRepeatFunc closeRepeat = (CloseRepeatFunc)resolveSymbol("_ZN19YMediaPlayerManager11closeRepeatEv");
 
     qDebug() << "[NeteasePlayer] symbols:"
              << "mediaMgrInst=" << (void*)mediaManagerInstance
@@ -472,6 +474,11 @@ void NeteasePlayer::playWithSystemPlayer(const QString &filePath) {
             setHasLrc(mpm, hasLrc);
             qDebug() << "[NeteasePlayer] step7: setHasLrc =" << hasLrc << "lrc=" << entity->mLrcFile;
         }
+        // 关掉单曲循环，否则一首歌播完会从头再放、也不会触发下一首
+        if (closeRepeat) {
+            closeRepeat(mpm);
+            qDebug() << "[NeteasePlayer] step7: closeRepeat done";
+        }
     }
 
     // ========== 清理 ==========
@@ -482,6 +489,7 @@ void NeteasePlayer::playWithSystemPlayer(const QString &filePath) {
     m_usingSystemPlayer = true;
 
     // 启动定时器轮询系统播放器状态，检测播放完成
+    m_sawPlaying = false;
     if (!m_systemPlayerTimer) {
         m_systemPlayerTimer = new QTimer(this);
         connect(m_systemPlayerTimer, &QTimer::timeout, this, &NeteasePlayer::checkSystemPlayerState);
@@ -506,10 +514,16 @@ void NeteasePlayer::checkSystemPlayerState() {
 
     int state = playState(mpm);
     // PlayState: 0=STOPPED, 1=PAUSED, 2=PLAYING
-    if (state != 2 && m_playing) {
+    if (state == 2) {
+        m_sawPlaying = true;
+        return;
+    }
+    // 暂停(1)不算播放结束；只有「播放过且已停止(0)」才认为这首放完了
+    if (state == 0 && m_sawPlaying) {
         qDebug() << "[NeteasePlayer] system player finished, state=" << state;
         m_systemPlayerTimer->stop();
         m_usingSystemPlayer = false;
+        m_sawPlaying = false;
         setPlaying(false);
         emit finished();
     }

@@ -18,6 +18,7 @@ Rectangle {
     signal prevSong()
     signal nextSong()
     signal downloadRequested(var song, bool withLyrics)
+    signal autoNext()               // 播放结束后请求自动续播下一首
 
     // ── 属性 ──
     property NeteasePlayer player: null
@@ -28,6 +29,7 @@ Rectangle {
     property string playUrl: ""
     property bool caching: false
     property string playState: "idle"    // idle/loading/playing/error
+    property bool autoPlayNext: false    // 本次切歌由播放结束自动触发，切完直接播放
 
     // 听歌记录相关
     property int playStartTime: 0      // 实际开始播放的时间戳
@@ -54,6 +56,7 @@ Rectangle {
     }
 
     function resetPlaybackState() {
+        playerPage.autoPlayNext = false
         playerPage.playStarted = false
         playerPage.playStartTime = 0
         playerPage.lastSongId = null
@@ -78,8 +81,10 @@ Rectangle {
         }
         function onFinished() {
             flushScrobble()
-            playerPage.setPlayState("idle", "播放完成")
-            playerPage.nextSong()
+            playerPage.caching = false
+            // 播放结束后按歌单顺序自动续播下一首
+            playerPage.autoPlayNext = true
+            playerPage.autoNext()
         }
         function onErrorOccurred(msg) {
             playerPage.setPlayState("error", "错误: " + msg)
@@ -97,7 +102,16 @@ Rectangle {
         if (currentSong && currentSong.id) {
             lastSongId = currentSong.id
             playStarted = false
-            if (currentSong.downloaded === true) {
+            if (playerPage.autoPlayNext === true) {
+                // 自动续播/按下一首：直接开始播放，不需要用户再点播放
+                playerPage.autoPlayNext = false
+                if (currentSong.downloaded === true) {
+                    setPlayState("loading", "正在播放下一首...")
+                    loadAndPlay()
+                } else {
+                    setPlayState("idle", "下一首还未下载，请先下载")
+                }
+            } else if (currentSong.downloaded === true) {
                 setPlayState("idle", "已下载，可点击播放")
             } else {
                 setPlayState("idle", "已选中，下载后再点击播放")

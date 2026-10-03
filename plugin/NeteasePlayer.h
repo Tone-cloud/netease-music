@@ -75,6 +75,7 @@ private:
     QTimer *m_systemPlayerTimer = nullptr;  // 系统播放器状态轮询
     bool m_usingSystemPlayer = false;       // 是否使用系统播放器
     bool m_playing = false;
+    bool m_sawPlaying = false;              // 本次播放是否真的进入过播放状态（避免启动瞬间误判结束）
 
     QString m_source;
     QString m_errorString;
