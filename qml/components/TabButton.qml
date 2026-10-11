@@ -5,7 +5,7 @@ Rectangle {
     width: 48
     height: 20
     radius: Theme.radiusRound
-    color: mouseArea.pressed ? Theme.withAlpha(Theme.primary, 0.2) : (selected ? Theme.withAlpha(Theme.primary, 0.15) : "transparent")
+    color: mouseArea.pressed ? Theme.withAlpha(Theme.primary, 0.45) : (selected ? Theme.withAlpha(Theme.primary, 0.22) : "transparent")
     border.width: 0
 
     signal clicked()
@@ -13,16 +13,16 @@ Rectangle {
     property bool selected: false
     property string text: ""
 
-    scale: mouseArea.pressed ? 0.92 : 1.0
+    scale: mouseArea.pressed ? 0.9 : 1.0
     Behavior on scale { NumberAnimation { duration: 80 } }
     Behavior on color { ColorAnimation { duration: 100 } }
 
     Text {
         text: root.text
-        color: root.selected ? Theme.primary : Theme.textSecondary
+        color: mouseArea.pressed ? "white" : (root.selected ? Theme.primary : Theme.textSecondary)
         font.family: Theme.fontFamily
         font.pixelSize: Theme.fontSmall
-        font.bold: root.selected
+        font.bold: root.selected || mouseArea.pressed
         anchors.centerIn: parent
 
         Behavior on color { ColorAnimation { duration: 100 } }

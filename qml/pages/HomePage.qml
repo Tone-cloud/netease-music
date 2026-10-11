@@ -227,34 +227,18 @@ Rectangle {
                 border.color: Theme.withAlpha(Theme.primary, 0.25)
                 border.width: 1
 
-                scale: exitMouseArea.pressed ? 0.92 : 1.0
+                scale: exitMouseArea.pressed ? 0.9 : 1.0
                 Behavior on scale { NumberAnimation { duration: 80 } }
 
-                Canvas {
+                // 退出键：真机 Canvas 渲染不可靠，改用必定可渲染的文本符号
+                Text {
                     anchors.centerIn: parent
-                    width: 12
-                    height: 12
-                    onPaint: {
-                        var ctx = getContext("2d")
-                        ctx.clearRect(0, 0, width, height)
-                        ctx.strokeStyle = Theme.textSecondary
-                        ctx.lineWidth = 1.4
-                        ctx.lineCap = "round"
-                        ctx.lineJoin = "round"
-                        ctx.beginPath()
-                        ctx.moveTo(7.5, 2)
-                        ctx.lineTo(10, 2)
-                        ctx.lineTo(10, 10)
-                        ctx.lineTo(7.5, 10)
-                        ctx.stroke()
-                        ctx.beginPath()
-                        ctx.moveTo(7, 6)
-                        ctx.lineTo(2.5, 6)
-                        ctx.moveTo(4.5, 4)
-                        ctx.lineTo(2.5, 6)
-                        ctx.lineTo(4.5, 8)
-                        ctx.stroke()
-                    }
+                    text: "×"
+                    color: exitMouseArea.pressed ? "white" : Theme.textSecondary
+                    font.family: Theme.fontFamily
+                    font.pixelSize: 15
+                    font.bold: true
+                    Behavior on color { ColorAnimation { duration: 80 } }
                 }
 
                 MouseArea {

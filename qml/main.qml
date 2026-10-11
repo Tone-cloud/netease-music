@@ -51,6 +51,7 @@ Rectangle {
     property var downloadedIds: []
     property var downloadedPaths: ({})
     property var downloadedPathsByName: ({})
+    property bool localDownloading: false   // 单曲下载进行中（下载回调自行管理）
 
     function stackContains(page) {
         for (var i = 0; i < pageStack.length; ++i) {
@@ -106,6 +107,7 @@ Rectangle {
         _animating = true
         currentPage = page
         pageTransition.restart()
+        animGuardTimer.restart()
     }
 
     function goBack() {
@@ -121,11 +123,13 @@ Rectangle {
             currentPage = prevPage
             pageStack = newStack
             pageTransitionBack.restart()
+            animGuardTimer.restart()
         } else if (currentPage !== "home") {
             savePageState(currentPage, capturePageState(currentPage))
             _animating = true
             currentPage = "home"
             pageTransitionBack.restart()
+            animGuardTimer.restart()
         } else {
             backButtonClicked()
         }
@@ -159,6 +163,13 @@ Rectangle {
                 NumberAnimation { target: pageTranslate; property: "x"; from: 12; to: 0; duration: 150; easing.type: Easing.OutCubic }
             }
             onFinished: root._animating = false
+        }
+
+        // 保险丝：真机动画完成信号偶发丢失时，兜底清除导航锁，避免点击被静默吞掉
+        Timer {
+            id: animGuardTimer
+            interval: 400
+            onTriggered: root._animating = false
         }
 
         SequentialAnimation {
@@ -526,12 +537,14 @@ Rectangle {
         transferProgress = 0
         transferLabel = "下载"
         transferFileName = song.name || ""
+        localDownloading = true
         transferStatusTimer.restart()
         // 下载歌曲时一律同时下载同名 .lrc 文件，与歌曲放在同一目录
         ApiClient.download(song.id, song.name, song.artist, true, function(d) {
             transferBusy = false
             transferProgress = 1
             transferLabel = "下载完成"
+            localDownloading = false
             var ok = d && d.code === 200
             var lrcPath = d && d.lrcPath ? d.lrcPath : ""
             if (!lrcPath && d && d.path) lrcPath = d.path.replace(/\.[^.]+$/i, ".lrc")
@@ -568,6 +581,7 @@ Rectangle {
         }, function(e) {
             transferBusy = false
             transferLabel = "下载失败"
+            localDownloading = false
             transferStatusTimer.stop()
             showToast("下载错误: " + e)
         })
@@ -578,15 +592,24 @@ Rectangle {
         ApiClient.transferStatus(function(d) {
             if (!d || !d.status) return
             var s = d.status
-            if (!s.running && !s.finished && s.action === "") return
-            transferBusy = !!s.running || s.finished === false
-            transferProgress = Math.max(0, Math.min(1, (s.total && s.total > 0) ? s.done / s.total : (s.percent || 0) / 100))
-            transferLabel = (s.action === "download" ? "下载中" : (s.action === "cache" ? "缓存中" : "处理中"))
-            transferFileName = s.fileName || transferFileName
+            // 服务端空闲（含残留的 finished=false 状态）且本地无单曲下载 → 清除卡死的进度条
+            if (!s.running && s.action === "") {
+                if (!root.localDownloading && root.transferBusy) {
+                    root.transferBusy = false
+                    root.transferProgress = 0
+                    root.transferLabel = ""
+                }
+                return
+            }
+            // 只有真正在跑的任务才显示进度条，避免残留状态把底部栏盖住
+            root.transferBusy = s.running === true
+            root.transferProgress = Math.max(0, Math.min(1, (s.total && s.total > 0) ? s.done / s.total : (s.percent || 0) / 100))
+            root.transferLabel = (s.action === "download" ? "下载中" : (s.action === "cache" ? "缓存中" : "处理中"))
+            root.transferFileName = s.fileName || root.transferFileName
             if (!s.running && s.finished) {
-                transferStatusTimer.stop()
-                transferBusy = false
-                transferLabel = "完成"
+                root.transferStatusTimer.stop()
+                root.transferBusy = false
+                root.transferLabel = "完成"
             }
         }, function() {})
     }
@@ -609,7 +632,8 @@ Rectangle {
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.bottom: parent.bottom
-        anchors.bottomMargin: 0
+        // 抬高到底部导航栏上方，即使显示也绝不遮挡底部栏点击
+        anchors.bottomMargin: Theme.tabBarHeight
         height: root.transferBusy ? 28 : 0
         visible: root.transferBusy
         color: Theme.bgSecondary
