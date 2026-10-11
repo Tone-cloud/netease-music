@@ -13,7 +13,12 @@ Rectangle {
     signal loaded(var item)
 
     property var files: []
+    property var groups: []        // 按歌单（目录）分组后的数据
+    property var expanded: ({})    // 哪些分组被展开（默认全部折叠）
+    property var rows: []          // 实际显示的列表（标题行 + 展开组内的歌曲）
     property bool loading: false
+    property bool offlineMode: false   // 服务不可用，走插件离线扫描
+    property var player: null          // C++ 插件（离线扫描用）
     property string selectedPath: ""
 
     Component.onCompleted: {
@@ -114,8 +119,10 @@ Rectangle {
             anchors.verticalCenter: parent.verticalCenter
             anchors.left: parent.left
             anchors.leftMargin: 10
-            text: localPage.loading ? "扫描中..." : "共 " + localPage.files.length + " 首"
-            color: Theme.textTertiary
+            text: localPage.loading ? "扫描中..."
+                  : (localPage.offlineMode ? "离线模式 · 共 " + localPage.files.length + " 首（未连接服务）"
+                                           : "共 " + localPage.files.length + " 首")
+            color: localPage.offlineMode ? Theme.warning : Theme.textTertiary
             font.pixelSize: Theme.fontTiny
             font.family: Theme.fontFamily
         }
@@ -124,7 +131,9 @@ Rectangle {
     // 空状态
     Text {
         anchors.centerIn: parent
-        text: localPage.loading ? "扫描中..." : "暂无本地音乐\n下载的歌曲会显示在这里"
+        text: localPage.loading ? "扫描中..."
+              : (localPage.offlineMode ? "离线模式，未找到本地歌曲\n（若 .so 未更新则不支持离线扫描）"
+                                       : "暂无本地音乐\n下载的歌曲会显示在这里")
         color: Theme.textTertiary
         font.pixelSize: Theme.fontSmall
         font.family: Theme.fontFamily
@@ -142,17 +151,54 @@ Rectangle {
         clip: true
         cacheBuffer: 200
         visible: localPage.files.length > 0
-        model: localPage.files
+        model: localPage.rows
 
         delegate: Rectangle {
             width: fileList.width
-            height: 32
-            color: index % 2 === 0 ? Theme.bgPrimary : Theme.bgCard
+            height: modelData.isHeader === true ? 30 : 34
+            color: modelData.isHeader === true ? Theme.bgSecondary
+                                               : (index % 2 === 0 ? Theme.bgPrimary : Theme.bgCard)
 
             scale: fileMouse.pressed ? 0.98 : 1.0
             Behavior on scale { NumberAnimation { duration: 60 } }
 
+            // 歌单分组标题
             Row {
+                visible: modelData.isHeader === true
+                anchors.fill: parent
+                anchors.leftMargin: 10
+                anchors.rightMargin: 10
+                spacing: 6
+
+                Text {
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: modelData.expanded === true ? "▾" : "▸"
+                    color: Theme.primary
+                    font.pixelSize: Theme.fontTiny
+                }
+
+                Text {
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: modelData.title || ""
+                    color: Theme.textPrimary
+                    font.pixelSize: Theme.fontSmall
+                    font.bold: true
+                    font.family: Theme.fontFamily
+                    elide: Text.ElideRight
+                    width: parent.width - 60
+                }
+
+                Text {
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: (modelData.count || 0) + " 首"
+                    color: Theme.textTertiary
+                    font.pixelSize: Theme.fontTiny
+                    font.family: Theme.fontFamily
+                }
+            }
+
+            Row {
+                visible: modelData.isHeader !== true
                 anchors.fill: parent
                 anchors.leftMargin: 10
                 anchors.rightMargin: 10
@@ -178,7 +224,7 @@ Rectangle {
                 // 文件信息
                 Column {
                     anchors.verticalCenter: parent.verticalCenter
-                    width: parent.width - 70
+                    width: parent.width - 74
                     spacing: 0
 
                     Text {
@@ -189,19 +235,31 @@ Rectangle {
                         elide: Text.ElideRight
                         width: parent.width
                     }
-                    Text {
-                        text: modelData.sizeStr + "  " + modelData.ext.toUpperCase()
-                        color: Theme.textTertiary
-                        font.pixelSize: Theme.fontTiny
-                        font.family: Theme.fontFamily
+                    Row {
+                        spacing: 4
+                        Text {
+                            text: modelData.sizeStr + "  " + modelData.ext.toUpperCase()
+                            color: Theme.textTertiary
+                            font.pixelSize: Theme.fontTiny
+                            font.family: Theme.fontFamily
+                        }
+                        Text {
+                            visible: modelData.lrc === true
+                            text: "词"
+                            color: Theme.primary
+                            font.pixelSize: Theme.fontTiny
+                            font.bold: true
+                            font.family: Theme.fontFamily
+                        }
                     }
                 }
 
-                // 删除按钮
+                // 删除按钮（离线模式隐藏：删除走 server，离线不可用）
                 Rectangle {
-                    width: 24
-                    height: 24
-                    radius: 4
+                    visible: !localPage.offlineMode
+                    width: 28
+                    height: 28
+                    radius: 6
                     color: delMouse.pressed ? Theme.withAlpha(Theme.error, 0.3) : "transparent"
                     anchors.verticalCenter: parent.verticalCenter
 
@@ -209,7 +267,7 @@ Rectangle {
                         anchors.centerIn: parent
                         text: "✕"
                         color: Theme.error
-                        font.pixelSize: Theme.fontTiny
+                        font.pixelSize: Theme.fontSmall
                         font.bold: true
                     }
 
@@ -228,7 +286,10 @@ Rectangle {
             MouseArea {
                 id: fileMouse
                 anchors.fill: parent
-                onClicked: localPage.playLocal(modelData)
+                onClicked: {
+                    if (modelData.isHeader === true) localPage.toggleGroup(modelData.folder)
+                    else localPage.playLocal(modelData)
+                }
             }
         }
     }
@@ -326,13 +387,114 @@ Rectangle {
         localPage.loading = true
         ApiClient.localList(function(d) {
             localPage.loading = false
+            localPage.offlineMode = false
             if (d.code === 200 && d.files) {
                 localPage.files = d.files
+                localPage.groups = localPage.buildGroups(d.files)
+                localPage.rows = localPage.buildRows()
             }
         }, function(e) {
+            // server 不可用（离线/未启动）→ 插件直接扫描本地目录兜底
             localPage.loading = false
-            console.log("[local] 扫描失败:", e)
+            console.log("[local] 服务不可用，切换到插件离线扫描:", e)
+            localPage.loadFromPlugin()
         })
+    }
+
+    // 离线兜底：不依赖 Go server 与网络，由 C++ 插件直接枚举本地音乐目录
+    function loadFromPlugin() {
+        var hasPluginScan = localPage.player && typeof localPage.player.scanLocalMusic === "function"
+        if (!hasPluginScan) {
+            localPage.offlineMode = true
+            localPage.files = []
+            localPage.groups = []
+            localPage.rows = []
+            console.log("[local] 当前 .so 不支持离线扫描，请更新 libnetease_player.so")
+            return
+        }
+        var files = []
+        try {
+            var raw = localPage.player.scanLocalMusic()
+            var parsed = JSON.parse(raw)
+            if (parsed && parsed.length > 0) files = parsed
+        } catch (e2) {
+            console.log("[local] 插件扫描结果解析失败:", e2)
+        }
+        localPage.offlineMode = true
+        localPage.files = files
+        localPage.groups = localPage.buildGroups(files)
+        localPage.rows = localPage.buildRows()
+    }
+
+    // 分组标题：取目录最后一段；netease 根目录归为「单曲」
+    function folderTitle(folder) {
+        if (!folder || folder.length === 0) return "本地音乐"
+        var parts = String(folder).split("/")
+        var last = parts[parts.length - 1]
+        if (last === "netease") return "单曲 / 未分类"
+        return last
+    }
+
+    // 按目录（歌单）分组，组内按下载时记录的歌单顺序（index）排列
+    function buildGroups(files) {
+        var groups = ({})
+        var order = []
+        for (var i = 0; i < files.length; i++) {
+            var f = files[i]
+            var key = f.folder || ""
+            if (!groups[key]) {
+                groups[key] = []
+                order.push(key)
+            }
+            groups[key].push(f)
+        }
+        order.sort(function(a, b) {
+            var ra = (a === "" || a === "netease") ? 0 : 1
+            var rb = (b === "" || b === "netease") ? 0 : 1
+            if (ra !== rb) return ra - rb
+            return String(a).localeCompare(String(b))
+        })
+        var rows = []
+        for (var g = 0; g < order.length; g++) {
+            var key2 = order[g]
+            var arr = groups[key2]
+            // 有歌单顺序用顺序；老文件没有顺序则按下载时间（modTime）排
+            arr.sort(function(a, b) {
+                var ka = (a.index && a.index > 0) ? a.index : (1000000 + (a.modTime || 0))
+                var kb = (b.index && b.index > 0) ? b.index : (1000000 + (b.modTime || 0))
+                if (ka !== kb) return ka - kb
+                return String(a.name).localeCompare(String(b.name))
+            })
+            rows.push({ key: key2, title: localPage.folderTitle(key2), songs: arr, count: arr.length })
+        }
+        return rows
+    }
+
+    // 根据展开状态生成显示列表：默认只显示各歌单标题（折叠），点标题才展开
+    function buildRows() {
+        var rows = []
+        for (var g = 0; g < localPage.groups.length; g++) {
+            var grp = localPage.groups[g]
+            var open = localPage.expanded[grp.key] === true
+            rows.push({ isHeader: true, title: grp.title, count: grp.count,
+                        folder: grp.key, expanded: open })
+            if (!open) continue
+            for (var j = 0; j < grp.songs.length; j++) {
+                var item = grp.songs[j]
+                item.isHeader = false
+                rows.push(item)
+            }
+        }
+        return rows
+    }
+
+    // 展开/折叠一个歌单分组
+    function toggleGroup(key) {
+        var next = ({})
+        for (var k in localPage.expanded) next[k] = localPage.expanded[k]
+        next[key] = !(localPage.expanded[key] === true)
+        localPage.expanded = next
+        localPage.rows = localPage.buildRows()
     }
 
     function deleteFile(path) {

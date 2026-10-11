@@ -23,7 +23,110 @@ var (
 	client    *http.Client
 	cookieJar *cookiejar.Jar
 	mu        sync.Mutex
+
+	// ── 用户信息离线缓存（登录态/详情/等级/歌单）──
+	// 离线或手动开启「离线模式」时，用户相关接口直接读缓存返回，
+	// 联网后自动用最新数据更新缓存，实现「保持登录状态」。
+	userCacheMu sync.Mutex
+	userCache   = map[string]json.RawMessage{} // key: login_status / user_playlist / user_detail / user_level
+	offlineMode = false                        // 持久化的离线模式开关
 )
+
+// 用户缓存文件路径（与 cookies.json 同目录，随插件安装）
+func userCachePath() string {
+	exe, err := os.Executable()
+	if err != nil {
+		return "user_cache.json"
+	}
+	return filepath.Join(filepath.Dir(exe), "user_cache.json")
+}
+
+func loadUserCache() {
+	userCacheMu.Lock()
+	defer userCacheMu.Unlock()
+	data, err := os.ReadFile(userCachePath())
+	if err != nil {
+		return
+	}
+	var disk struct {
+		Offline bool                       `json:"offline"`
+		Cache   map[string]json.RawMessage `json:"cache"`
+	}
+	if json.Unmarshal(data, &disk) != nil {
+		return
+	}
+	if disk.Cache != nil {
+		userCache = disk.Cache
+	}
+	offlineMode = disk.Offline
+	fmt.Printf("[offline] 用户缓存已加载 %d 项, 离线模式: %v\n", len(userCache), offlineMode)
+}
+
+func saveUserCache() {
+	userCacheMu.Lock()
+	defer userCacheMu.Unlock()
+	disk := struct {
+		Offline bool                       `json:"offline"`
+		Cache   map[string]json.RawMessage `json:"cache"`
+	}{Offline: offlineMode, Cache: userCache}
+	data, _ := json.Marshal(disk)
+	os.WriteFile(userCachePath(), data, 0644)
+}
+
+func clearUserCache() {
+	userCacheMu.Lock()
+	userCache = map[string]json.RawMessage{}
+	offlineMode = false
+	userCacheMu.Unlock()
+	saveUserCache()
+}
+
+// 用户相关接口统一出口：
+//   离线模式开启 → 只读缓存，不请求上游（避免离线时 30s 超时等待）；
+//   离线模式关闭 → 先请求上游并更新缓存，上游失败时回退缓存兜底。
+func serveUserEndpoint(w http.ResponseWriter, key string, fetch func() ([]byte, error)) {
+	userCacheMu.Lock()
+	offline := offlineMode
+	userCacheMu.Unlock()
+
+	if offline {
+		writeUserCache(w, key)
+		return
+	}
+
+	data, err := fetch()
+	if err == nil {
+		userCacheMu.Lock()
+		userCache[key] = json.RawMessage(data)
+		userCacheMu.Unlock()
+		saveUserCache()
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.Write(data)
+		return
+	}
+	// 上游不可达（断网等）：缓存兜底，注入 offline 标记
+	writeUserCache(w, key)
+}
+
+// 从缓存读取并注入 offline 标记后返回
+func writeUserCache(w http.ResponseWriter, key string) {
+	userCacheMu.Lock()
+	raw, ok := userCache[key]
+	userCacheMu.Unlock()
+	if !ok {
+		writeError(w, "离线且无缓存数据")
+		return
+	}
+	var obj map[string]interface{}
+	if json.Unmarshal(raw, &obj) != nil || obj == nil {
+		obj = map[string]interface{}{}
+	}
+	obj["offline"] = true
+	obj["cachedAt"] = time.Now().Format("2006-01-02 15:04")
+	out, _ := json.Marshal(obj)
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Write(out)
+}
 
 const (
 	listenAddr = "127.0.0.1:8002"
@@ -118,7 +221,7 @@ func startBatchDownload(tasks []BatchTask) {
 			batchMu.Unlock()
 
 			// 执行下载
-			err := downloadSong(task.ID, task.Name, task.Artist, task.Folder)
+			err := downloadSong(task.ID, task.Name, task.Artist, task.Folder, batchIdx+1)
 			batchMu.Lock()
 			if err != nil {
 				if strings.Contains(err.Error(), "已存在") {
@@ -136,7 +239,7 @@ func startBatchDownload(tasks []BatchTask) {
 	}()
 }
 
-func downloadSong(id int64, name, artist, folder string) error {
+func downloadSong(id int64, name, artist, folder string, trackIndex int) error {
 	safeName := sanitizeFilename(name)
 	if safeName == "" {
 		safeName = fmt.Sprintf("%d", id)
@@ -147,8 +250,14 @@ func downloadSong(id int64, name, artist, folder string) error {
 	}
 	os.MkdirAll(targetDir, 0755)
 	dlFile := filepath.Join(targetDir, safeName+".mp3")
+	lrcFile := strings.TrimSuffix(dlFile, filepath.Ext(dlFile)) + ".lrc"
 	// 检查是否已下载
 	if _, err := os.Stat(dlFile); err == nil {
+		writeDownloadedSongMetadata(fmt.Sprintf("%d", id), name, artist, dlFile, trackIndex)
+		// 已下载过的歌曲补齐缺失的同名歌词
+		if err := ensureLyricFile(fmt.Sprintf("%d", id), lrcFile); err != nil {
+			fmt.Printf("[batch] 歌词补齐失败 %s: %v\n", name, err)
+		}
 		return fmt.Errorf("已存在")
 	}
 	// 获取地址
@@ -168,7 +277,106 @@ func downloadSong(id int64, name, artist, folder string) error {
 	if songUrl == "" {
 		return fmt.Errorf("歌曲无可用播放地址")
 	}
-	return downloadFile(songUrl, dlFile)
+	if err := downloadFile(songUrl, dlFile); err != nil {
+		return err
+	}
+	if err := writeDownloadedSongMetadata(fmt.Sprintf("%d", id), name, artist, dlFile, trackIndex); err != nil {
+		return err
+	}
+	// 同时下载同名歌词文件，放在与音频相同的目录
+	if err := downloadLyricFile(fmt.Sprintf("%d", id), lrcFile); err != nil {
+		fmt.Printf("[batch] 歌词下载失败 %s: %v\n", name, err)
+	}
+	return nil
+}
+
+func writeDownloadedSongMetadata(id, name, artist, audioPath string, trackIndex int) error {
+	metadata := map[string]interface{}{
+		"id":     id,
+		"name":   name,
+		"artist": artist,
+		"index":  trackIndex,
+	}
+	data, err := json.Marshal(metadata)
+	if err != nil {
+		return err
+	}
+	metadataPath := strings.TrimSuffix(audioPath, filepath.Ext(audioPath)) + ".json"
+	return os.WriteFile(metadataPath, data, 0644)
+}
+
+// readLocalSongID 读取音频同名 .json 元数据里的歌曲 id（读不到返回空串）
+func readLocalSongID(audioPath string) string {
+	metadataPath := strings.TrimSuffix(audioPath, filepath.Ext(audioPath)) + ".json"
+	data, err := os.ReadFile(metadataPath)
+	if err != nil {
+		return ""
+	}
+	var meta struct {
+		ID string `json:"id"`
+	}
+	if json.Unmarshal(data, &meta) != nil {
+		return ""
+	}
+	return meta.ID
+}
+
+// flattenLegacySongFolders 把历史遗留的「单曲独立目录」里的文件搬回音乐根目录。
+// 旧版单曲下载会建 /userdisk/Music/netease/<歌名>/<歌名>.mp3，
+// 导致多首单曲分属不同目录，播放器无法连续播放。
+// 只处理「目录里只有这一首歌」的情况，批量下载的<歌单名>目录不会被动到。
+func flattenLegacySongFolders() {
+	entries, err := os.ReadDir(musicDir)
+	if err != nil {
+		return
+	}
+	moved := 0
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		dir := filepath.Join(musicDir, e.Name())
+		if filepath.Clean(dir) == filepath.Clean(cacheDir) {
+			continue
+		}
+		files, err := os.ReadDir(dir)
+		if err != nil {
+			continue
+		}
+		// 目录里必须存在与目录同名的音频，且没有第二首歌
+		srcAudio := filepath.Join(dir, e.Name()+".mp3")
+		if fi, err := os.Stat(srcAudio); err != nil || fi.IsDir() {
+			continue
+		}
+		single := true
+		for _, f := range files {
+			if strings.ToLower(filepath.Ext(f.Name())) == ".mp3" && f.Name() != e.Name()+".mp3" {
+				single = false
+				break
+			}
+		}
+		if !single {
+			continue
+		}
+		destBase := filepath.Join(musicDir, e.Name())
+		if _, err := os.Stat(destBase + ".mp3"); err == nil {
+			continue // 根目录已有同名文件，跳过避免覆盖
+		}
+		for _, ext := range []string{".mp3", ".lrc", ".json"} {
+			src := filepath.Join(dir, e.Name()+ext)
+			if _, err := os.Stat(src); err != nil {
+				continue
+			}
+			if err := os.Rename(src, destBase+ext); err != nil {
+				fmt.Printf("[flatten] 移动失败 %s: %v\n", src, err)
+			}
+		}
+		os.Remove(dir) // 空目录才删得掉，非空忽略
+		moved++
+	}
+	if moved > 0 {
+		fmt.Printf("[flatten] 已归并 %d 首单曲到 %s\n", moved, musicDir)
+	}
 }
 
 func getBatchStatus() BatchStatus {
@@ -220,10 +428,14 @@ func init() {
 	}
 	os.MkdirAll(cacheDir, 0755)
 	os.MkdirAll(musicDir, 0755)
+	// 历史单曲目录归并到音乐根目录，保证同一目录可连续播放
+	go flattenLegacySongFolders()
 	// 异步清理超过 7 天的缓存文件
 	go cleanOldCache()
 	// 读取 cookies.json（登录状态）
 	loadCookiesFromFile()
+	// 读取用户信息缓存（离线模式开关、登录态/详情/等级/歌单）
+	loadUserCache()
 }
 
 // 从 cookies.json 加载 cookies 到 cookieJar
@@ -262,6 +474,7 @@ func main() {
 	http.HandleFunc("/search", handleSearch)
 	http.HandleFunc("/song/url", handleSongUrl)
 	http.HandleFunc("/lyric", handleLyric)
+	http.HandleFunc("/lyric/file", handleLocalLyric)
 	http.HandleFunc("/playlist/detail", handlePlaylistDetail)
 	http.HandleFunc("/recommend/resource", handleRecommend)
 	http.HandleFunc("/recommend/songs", handleDailyRecommend)
@@ -271,6 +484,7 @@ func main() {
 	http.HandleFunc("/login/status", handleLoginStatus)
 	http.HandleFunc("/cookies/import", handleImportCookies)
 	http.HandleFunc("/logout", handleLogout)
+	http.HandleFunc("/offline/mode", handleOfflineMode)
 	http.HandleFunc("/user/playlist", handleUserPlaylist)
 	http.HandleFunc("/user/detail", handleUserDetail)
 	http.HandleFunc("/user/level", handleUserLevel)
@@ -316,7 +530,7 @@ func initCookies() {
 		{Name: "NMTID", Value: nmtid, Path: "/", Domain: ".music.163.com"},
 		{Name: "os", Value: "pc", Path: "/", Domain: ".music.163.com"},
 	})
-	fmt.Printf("[cookies] 手动设置 __csrf=%s NMTID=%s\n", csrfToken, nmtid)
+	fmt.Println("[cookies] 已初始化 __csrf、NMTID 和 os")
 	// 访问首页，让服务器设置更多 cookie
 	req, _ := http.NewRequest("GET", "https://music.163.com/", nil)
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
@@ -331,7 +545,7 @@ func initCookies() {
 	cookies := cookieJar.Cookies(u)
 	fmt.Printf("[cookies] 初始化完成，获取到 %d 个 cookies\n", len(cookies))
 	for _, c := range cookies {
-		fmt.Printf("[cookies]   %s=%s\n", c.Name, c.Value[:min(20, len(c.Value))])
+		fmt.Printf("[cookies]   %s 已加载\n", c.Name)
 	}
 }
 
@@ -539,12 +753,16 @@ func handleToplist(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleTopListDetail(w http.ResponseWriter, r *http.Request) {
-	idx := r.URL.Query().Get("idx")
-	if idx == "" {
-		idx = "0"
+	id := r.URL.Query().Get("id")
+	if id == "" {
+		id = r.URL.Query().Get("idx")
 	}
-	body := fmt.Sprintf(`{"id":0,"idx":%s,"limit":30,"offset":0,"total":true}`, idx)
-	data, err := weapiPost("/weapi/top/list", body)
+	if id == "" {
+		writeError(w, "缺少 id")
+		return
+	}
+	body := fmt.Sprintf(`{"id":%s,"n":1000,"s":8}`, id)
+	data, err := weapiPost("/weapi/v6/playlist/detail", body)
 	if err != nil {
 		writeError(w, err.Error())
 		return
@@ -627,23 +845,48 @@ func handleImportCookies(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleLoginStatus(w http.ResponseWriter, r *http.Request) {
-	data, err := weapiPost("/weapi/w/nuser/account/get", `{}`)
+	serveUserEndpoint(w, "login_status", func() ([]byte, error) {
+		return weapiPost("/weapi/w/nuser/account/get", `{}`)
+	})
+}
+
+func handleLogout(w http.ResponseWriter, r *http.Request) {
+	// 无论上游是否可达，先清除本地用户缓存与离线模式，
+	// 避免离线退出后下次启动又读到缓存里的旧账号
+	clearUserCache()
+	data, err := weapiPost("/weapi/logout", `{}`)
 	if err != nil {
-		writeError(w, err.Error())
+		// 离线退出：本地已清除，返回成功让前端清登录状态
+		writeJSON(w, map[string]interface{}{"code": 200, "offline": true, "msg": "离线退出（本地已清除）"})
 		return
 	}
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.Write(data)
 }
 
-func handleLogout(w http.ResponseWriter, r *http.Request) {
-	data, err := weapiPost("/weapi/logout", `{}`)
-	if err != nil {
-		writeError(w, err.Error())
+// 离线模式开关：GET 查询 / POST 设置（持久化到 user_cache.json）
+func handleOfflineMode(w http.ResponseWriter, r *http.Request) {
+	if r.Method == "POST" {
+		var req struct {
+			Offline bool `json:"offline"`
+		}
+		if json.NewDecoder(r.Body).Decode(&req) != nil {
+			writeError(w, "JSON 解析失败")
+			return
+		}
+		userCacheMu.Lock()
+		offlineMode = req.Offline
+		userCacheMu.Unlock()
+		saveUserCache()
+		fmt.Printf("[offline] 离线模式切换为: %v\n", offlineMode)
+		writeJSON(w, map[string]interface{}{"code": 200, "offline": offlineMode})
 		return
 	}
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	w.Write(data)
+	userCacheMu.Lock()
+	off := offlineMode
+	count := len(userCache)
+	userCacheMu.Unlock()
+	writeJSON(w, map[string]interface{}{"code": 200, "offline": off, "cachedItems": count})
 }
 
 func handleUserPlaylist(w http.ResponseWriter, r *http.Request) {
@@ -652,14 +895,10 @@ func handleUserPlaylist(w http.ResponseWriter, r *http.Request) {
 		writeError(w, "缺少 uid")
 		return
 	}
-	body := fmt.Sprintf(`{"uid":%s,"limit":30,"offset":0,"includeVideo":true}`, uid)
-	data, err := weapiPost("/weapi/user/playlist", body)
-	if err != nil {
-		writeError(w, err.Error())
-		return
-	}
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	w.Write(data)
+	serveUserEndpoint(w, "user_playlist", func() ([]byte, error) {
+		body := fmt.Sprintf(`{"uid":%s,"limit":30,"offset":0,"includeVideo":true}`, uid)
+		return weapiPost("/weapi/user/playlist", body)
+	})
 }
 
 // ── 用户详情（等级、签名、关注/粉丝、听歌次数）──
@@ -669,24 +908,16 @@ func handleUserDetail(w http.ResponseWriter, r *http.Request) {
 		writeError(w, "缺少 uid")
 		return
 	}
-	data, err := weapiPost("/weapi/v1/user/detail/"+uid, `{}`)
-	if err != nil {
-		writeError(w, err.Error())
-		return
-	}
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	w.Write(data)
+	serveUserEndpoint(w, "user_detail", func() ([]byte, error) {
+		return weapiPost("/weapi/v1/user/detail/"+uid, `{}`)
+	})
 }
 
 // ── 用户等级 ──
 func handleUserLevel(w http.ResponseWriter, r *http.Request) {
-	data, err := weapiPost("/weapi/user/level", `{}`)
-	if err != nil {
-		writeError(w, err.Error())
-		return
-	}
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	w.Write(data)
+	serveUserEndpoint(w, "user_level", func() ([]byte, error) {
+		return weapiPost("/weapi/user/level", `{}`)
+	})
 }
 
 // ── 用户订阅统计（歌单、歌手、专辑、MV等数量）──
@@ -862,14 +1093,31 @@ func handleDownload(w http.ResponseWriter, r *http.Request) {
 	if safeName == "" {
 		safeName = id
 	}
-	targetDir := filepath.Join(musicDir, safeName)
+	// 单曲统一放在 /userdisk/Music/netease 根目录（与批量下载同处一个目录），
+	// 这样词典笔播放器里多首单曲属于同一个目录，可以连续播放/切换。
+	targetDir := musicDir
 	if err := os.MkdirAll(targetDir, 0755); err != nil {
 		writeError(w, "创建目录失败: "+err.Error())
 		return
 	}
 	dlFile := filepath.Join(targetDir, safeName+".mp3")
+	if existID := readLocalSongID(dlFile); existID != "" && existID != id {
+		// 同名不同曲：用「歌名 - 歌手」区分，避免互相覆盖
+		alt := sanitizeFilename(name + " - " + artist)
+		if alt == "" || alt == safeName {
+			alt = safeName + " - " + id
+		}
+		dlFile = filepath.Join(targetDir, alt+".mp3")
+	}
+	lrcFile := strings.TrimSuffix(dlFile, filepath.Ext(dlFile)) + ".lrc"
 	if _, err := os.Stat(dlFile); err == nil {
-		writeJSON(w, map[string]interface{}{"code": 200, "path": dlFile, "msg": "已存在"})
+		if includeLrc {
+			if err := ensureLyricFile(id, lrcFile); err != nil {
+				fmt.Printf("[download] 歌词补齐失败: %v\n", err)
+			}
+		}
+		_, lrcErr := os.Stat(lrcFile)
+		writeJSON(w, map[string]interface{}{"code": 200, "path": dlFile, "lrcPath": lrcFile, "lrc": lrcErr == nil, "msg": "已存在"})
 		return
 	}
 	body := fmt.Sprintf(`{"ids":"[%s]","level":"standard","encodeType":"mp3"}`, id)
@@ -897,14 +1145,27 @@ func handleDownload(w http.ResponseWriter, r *http.Request) {
 		writeError(w, "下载失败: "+err.Error())
 		return
 	}
+	lrcOK := false
 	if includeLrc {
-		lrcPath := filepath.Join(targetDir, safeName+".lrc")
-		if err := downloadLyricFile(id, lrcPath); err != nil {
+		if err := downloadLyricFile(id, lrcFile); err != nil {
 			fmt.Printf("[download] lyric failed: %v\n", err)
+		} else {
+			lrcOK = true
 		}
 	}
+	if err := writeDownloadedSongMetadata(id, name, artist, dlFile, 0); err != nil {
+		fmt.Printf("[download] metadata write failed: %v\n", err)
+	}
 	updateTransferStatus("download", filepath.Base(dlFile), 1, 1, false, "")
-	writeJSON(w, map[string]interface{}{"code": 200, "path": dlFile, "name": name, "artist": artist, "lrc": includeLrc})
+	writeJSON(w, map[string]interface{}{"code": 200, "path": dlFile, "lrcPath": lrcFile, "name": name, "artist": artist, "lrc": lrcOK})
+}
+
+// ensureLyricFile 确保同名歌词文件存在，缺失时重新拉取
+func ensureLyricFile(id string, dest string) error {
+	if fi, err := os.Stat(dest); err == nil && fi.Size() > 0 {
+		return nil
+	}
+	return downloadLyricFile(id, dest)
 }
 
 func downloadLyricFile(id string, dest string) error {
@@ -929,27 +1190,111 @@ func downloadLyricFile(id string, dest string) error {
 }
 
 func handleDownloads(w http.ResponseWriter, r *http.Request) {
-	files, err := os.ReadDir(musicDir)
+	var list []map[string]interface{}
+	err := filepath.Walk(musicDir, func(path string, info os.FileInfo, walkErr error) error {
+		if walkErr != nil || info == nil || info.IsDir() {
+			return nil
+		}
+		if filepath.Clean(path) == filepath.Clean(cacheDir) || strings.HasPrefix(filepath.Clean(path), filepath.Clean(cacheDir)+string(os.PathSeparator)) {
+			return nil
+		}
+		ext := strings.ToLower(filepath.Ext(info.Name()))
+		if ext != ".mp3" && ext != ".flac" && ext != ".m4a" && ext != ".aac" {
+			return nil
+		}
+		metadataPath := strings.TrimSuffix(path, filepath.Ext(path)) + ".json"
+		var metadata struct {
+			ID     string `json:"id"`
+			Name   string `json:"name"`
+			Artist string `json:"artist"`
+		}
+		if data, err := os.ReadFile(metadataPath); err == nil {
+			json.Unmarshal(data, &metadata)
+		}
+		if metadata.Name == "" {
+			metadata.Name = strings.TrimSuffix(info.Name(), ext)
+		}
+		lrcPath := strings.TrimSuffix(path, filepath.Ext(path)) + ".lrc"
+		lrcOK := false
+		if fi, statErr := os.Stat(lrcPath); statErr == nil && fi.Size() > 0 {
+			lrcOK = true
+		} else {
+			lrcPath = ""
+		}
+		list = append(list, map[string]interface{}{
+			"id": metadata.ID,
+			"name": metadata.Name,
+			"artist": metadata.Artist,
+			"path": path,
+			"size": fmt.Sprintf("%.1fMB", float64(info.Size())/1024/1024),
+			"lrc": lrcOK,
+			"lrcPath": lrcPath,
+		})
+		return nil
+	})
 	if err != nil {
-		writeJSON(w, map[string]interface{}{"code": 200, "files": []interface{}{}})
+		writeError(w, "扫描下载目录失败: "+err.Error())
 		return
 	}
-	var list []map[string]interface{}
-	for _, f := range files {
-		if f.IsDir() {
-			continue
-		}
-		ext := strings.ToLower(filepath.Ext(f.Name()))
-		if ext == ".mp3" || ext == ".flac" || ext == ".m4a" || ext == ".aac" {
-			info, _ := f.Info()
-			list = append(list, map[string]interface{}{
-				"name": strings.TrimSuffix(f.Name(), ext),
-				"path": filepath.Join(musicDir, f.Name()),
-				"size": fmt.Sprintf("%.1fMB", float64(info.Size())/1024/1024),
-			})
+	writeJSON(w, map[string]interface{}{"code": 200, "files": list})
+}
+
+// handleLocalLyric 读取本地已下载的同名歌词文件（限制在音乐目录内）
+func handleLocalLyric(w http.ResponseWriter, r *http.Request) {
+	p := r.URL.Query().Get("path")
+	if p == "" {
+		if id := r.URL.Query().Get("id"); id != "" {
+			p = findDownloadedLrcByID(id)
 		}
 	}
-	writeJSON(w, map[string]interface{}{"code": 200, "files": list})
+	if p == "" {
+		writeError(w, "未找到本地歌词")
+		return
+	}
+	cleanPath := filepath.Clean(p)
+	cleanRoot := filepath.Clean(musicDir)
+	if cleanPath != cleanRoot && !strings.HasPrefix(cleanPath, cleanRoot+string(os.PathSeparator)) {
+		writeError(w, "路径不合法")
+		return
+	}
+	data, err := os.ReadFile(cleanPath)
+	if err != nil {
+		writeError(w, "读取歌词失败: "+err.Error())
+		return
+	}
+	writeJSON(w, map[string]interface{}{"code": 200, "lyric": string(data), "path": cleanPath})
+}
+
+// findDownloadedLrcByID 通过歌曲 id 在下载目录中查找同名歌词文件
+func findDownloadedLrcByID(id string) string {
+	found := ""
+	filepath.Walk(musicDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil || info == nil || info.IsDir() || found != "" {
+			return nil
+		}
+		if filepath.Clean(path) == filepath.Clean(cacheDir) || strings.HasPrefix(filepath.Clean(path), filepath.Clean(cacheDir)+string(os.PathSeparator)) {
+			return nil
+		}
+		if strings.ToLower(filepath.Ext(info.Name())) != ".json" {
+			return nil
+		}
+		data, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return nil
+		}
+		var meta struct {
+			ID string `json:"id"`
+		}
+		if json.Unmarshal(data, &meta) != nil || meta.ID == "" || meta.ID != id {
+			return nil
+		}
+		lrc := strings.TrimSuffix(path, ".json") + ".lrc"
+		if fi, statErr := os.Stat(lrc); statErr == nil && fi.Size() > 0 {
+			found = lrc
+		}
+		return nil
+	})
+	return found
 }
 
 // ── 批量下载 API ──
@@ -1002,6 +1347,27 @@ func handleLocalList(w http.ResponseWriter, r *http.Request) {
 			if strings.Contains(path, "/cache/") {
 				return nil
 			}
+			lrcPath := strings.TrimSuffix(path, filepath.Ext(path)) + ".lrc"
+			lrcOK := false
+			if fi, statErr := os.Stat(lrcPath); statErr == nil && fi.Size() > 0 {
+				lrcOK = true
+			} else {
+				lrcPath = ""
+			}
+			// 读取下载时写入的元数据（歌单内顺序、歌手）
+			var metadata struct {
+				Artist string `json:"artist"`
+				Index  int    `json:"index"`
+			}
+			if data, readErr := os.ReadFile(strings.TrimSuffix(path, filepath.Ext(path)) + ".json"); readErr == nil {
+				json.Unmarshal(data, &metadata)
+			}
+			// 所属目录（相对 /userdisk/Music），本地音乐页按它分组显示歌单
+			folder, relErr := filepath.Rel(localMusicRoot, filepath.Dir(path))
+			if relErr != nil || folder == "." {
+				folder = ""
+			}
+			folder = filepath.ToSlash(folder)
 			list = append(list, map[string]interface{}{
 				"name":    strings.TrimSuffix(info.Name(), ext),
 				"path":    path,
@@ -1009,6 +1375,11 @@ func handleLocalList(w http.ResponseWriter, r *http.Request) {
 				"sizeStr": fmt.Sprintf("%.1fMB", float64(info.Size())/1024/1024),
 				"modTime": info.ModTime().Unix(),
 				"ext":     ext,
+				"lrc":     lrcOK,
+				"lrcPath": lrcPath,
+				"artist":  metadata.Artist,
+				"index":   metadata.Index,
+				"folder":  folder,
 			})
 		}
 		return nil

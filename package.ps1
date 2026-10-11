@@ -2,7 +2,7 @@
 # 注意：libnetease_player.so 需要从 GitHub Actions 下载后放入插件目录
 
 $ErrorActionPreference = "Stop"
-$root = "C:\Users\aresi\Desktop\cc\netease_music_v3"
+$root = $PSScriptRoot
 $out = "C:\Users\aresi\Desktop\cc\com.netease.music.zip"
 
 if (Test-Path $out) { Remove-Item $out -Force }

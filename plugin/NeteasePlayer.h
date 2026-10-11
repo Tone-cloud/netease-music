@@ -57,6 +57,9 @@ public slots:
     Q_INVOKABLE void execDetached(const QString &cmd);
     /// 使用系统原生播放器播放本地文件
     Q_INVOKABLE void playWithSystemPlayer(const QString &filePath);
+    /// 直接扫描本地音乐目录（/userdisk/Music），返回 JSON 数组
+    /// 不依赖 Go server 与网络，离线时本地音乐页用它兜底
+    Q_INVOKABLE QString scanLocalMusic();
 
 signals:
     void sourceChanged(const QString &source);
@@ -75,6 +78,7 @@ private:
     QTimer *m_systemPlayerTimer = nullptr;  // 系统播放器状态轮询
     bool m_usingSystemPlayer = false;       // 是否使用系统播放器
     bool m_playing = false;
+    bool m_sawPlaying = false;              // 本次播放是否真的进入过播放状态（避免启动瞬间误判结束）
 
     QString m_source;
     QString m_errorString;

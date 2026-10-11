@@ -20,6 +20,12 @@ Item {
     readonly property color primaryGlow: "#1AC20C0C"
     readonly property color accent: "#C20C0C"
 
+    // ── 品牌渐变（网易云红 → 亮红）──
+    readonly property color gradientFrom: "#C20C0C"
+    readonly property color gradientTo: "#E8453C"
+    readonly property color gradientDeep: "#8B0000"
+    readonly property color shadowColor: "#33000000"
+
     // ── 背景色（深色主题，bili风格）──
     readonly property color bgPrimary: "#0D0D0D"
     readonly property color bgSecondary: "#181818"
@@ -97,12 +103,12 @@ Item {
 
     // ── 触摸最小点击区域 ──
     readonly property int touchMinSize: 28
-    readonly property int buttonHeight: 24
+    readonly property int buttonHeight: 26
     readonly property int buttonHeightLarge: 30
 
     // ── 标题栏/底部栏 ──
     readonly property int titleBarHeight: 28
-    readonly property int tabBarHeight: 26
+    readonly property int tabBarHeight: 28
 
     // ── 动画时长 ──
     readonly property int animFast: 120

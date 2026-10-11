@@ -40,12 +40,17 @@ Rectangle {
     property int currentIndex: -1
     property var userInfo: null
     property bool isLoggedIn: false
+    property bool offlineMode: false   // 离线模式（登录态走本地缓存，联网后自动更新）
     property string serverStatus: "启动中..."
     property var globalPlayer: player   // 避免与子页面 player 属性命名冲突
     property bool transferBusy: false
     property real transferProgress: 0
     property string transferLabel: ""
     property string transferFileName: ""
+    property string searchKeyword: ""
+    property var downloadedIds: []
+    property var downloadedPaths: ({})
+    property var downloadedPathsByName: ({})
 
     function stackContains(page) {
         for (var i = 0; i < pageStack.length; ++i) {
@@ -178,6 +183,7 @@ Rectangle {
                     onBackButtonClicked: root.backButtonClicked()
                     onOpenPlaylist: function(id) { root.navigateTo("playlist", { id: id }) }
                     onOpenSearch: root.navigateTo("search")
+                    onOpenSearchWithKeyword: function(kw) { root.searchKeyword = kw; root.navigateTo("search") }
                     onOpenLogin: root.navigateTo("user")
                     onOpenUser: root.navigateTo("user")
                     onOpenToplist: function(idx) { root.navigateTo("toplist") }
@@ -216,18 +222,7 @@ Rectangle {
                     onPlaylistIdChanged: {
                         var id = root.playlistId
                         if (!id) return
-                        if (id === "daily") {
-                            if (item) item.load("daily")
-                        } else if (id.indexOf("top_") === 0) {
-                            ApiClient.topListDetail(root.playlistIdx, function(d) {
-                                if (d.code === 200 && d.playlist) {
-                                    item.playlistName = d.playlist.name
-                                    item.parseSongs(d.playlist.tracks || [])
-                                }
-                            }, null)
-                        } else {
-if (item) item.load(id)
-                        }
+                        if (item) item.load(id)
                     }
                     onLoaded: function(item) {
                         if (root.playlistId) item.load(root.playlistId)
@@ -244,7 +239,7 @@ if (item) item.load(id)
             sourceComponent: Component {
                 Pages.ToplistPage {
                     onBackClicked: root.goBack()
-                    onOpenPlaylist: function(id, index) { root.navigateTo("playlist", { id: "top_" + index, idx: index }) }
+                    onOpenPlaylist: function(id, index) { root.navigateTo("playlist", { id: "top_" + id, idx: id }) }
                     onLoaded: function(item) { }
                 }
             }
@@ -257,13 +252,27 @@ if (item) item.load(id)
             anchors.fill: parent
             sourceComponent: Component {
                 Pages.PlayerPage {
+                    id: playerPage
                     player: root.globalPlayer
                     currentSong: root.currentSong
                     playlist: root.playlist
                     currentIndex: root.currentIndex
                     onBackClicked: root.goBack()
-                    onPrevSong: root.playPrev()
-                    onNextSong: root.playNext()
+                    onPrevSong: {
+                        if (playerPage.playState === "playing") playerPage.autoPlayNext = true
+                        root.playPrev()
+                    }
+                    onNextSong: {
+                        // 正在播放时按下一首，切过去后继续播放
+                        if (playerPage.playState === "playing") playerPage.autoPlayNext = true
+                        root.playNext()
+                    }
+                    onAutoNext: {
+                        if (!root.playNextDownloaded()) {
+                            playerPage.autoPlayNext = false
+                            playerPage.setPlayState("idle", "本歌单已播放完毕")
+                        }
+                    }
                     onDownloadRequested: function(song, withLyrics) { root.downloadSong(song, withLyrics) }
                 }
             }
@@ -277,10 +286,12 @@ if (item) item.load(id)
             sourceComponent: Component {
                 Pages.UserPage {
                     userInfo: root.userInfo
+                    offlineMode: root.offlineMode
                     onBackClicked: root.goBack()
                     onOpenLogin: root.navigateTo("login")
                     onOpenPlaylist: function(id) { root.navigateTo("playlist", { id: id }) }
                     onOpenLocal: root.navigateTo("local")
+                    onToggleOfflineMode: function(on) { root.setOfflineMode(on) }
                     onLogout: function() {
                         ApiClient.logout(function() {
                             root.isLoggedIn = false
@@ -300,6 +311,7 @@ if (item) item.load(id)
             anchors.fill: parent
             sourceComponent: Component {
                 Pages.LocalMusicPage {
+                    player: root.globalPlayer   // 离线时用插件直接扫描本地目录
                     onBackClicked: root.goBack()
                     onPlayLocal: function(file) {
                         root.globalPlayer.play(file.path)
@@ -334,6 +346,10 @@ if (item) item.load(id)
                     serverStatus = "已连接"
                     serverCheckTimer.stop()
                     serverStarting = false
+                    // 同步持久化的离线模式开关（用户上次手动设置过）
+                    ApiClient.offlineMode(function(d) {
+                        if (d && d.code === 200) root.offlineMode = !!d.offline
+                    })
                     checkLogin()
                 }
             })
@@ -345,6 +361,29 @@ if (item) item.load(id)
         }
     }
 
+    function loadDownloadedIds() {
+        ApiClient.downloadList(function(d) {
+            if (d && d.code === 200 && d.files) {
+                var ids = []
+                var paths = ({})
+                var pathsByName = ({})
+                for (var i = 0; i < d.files.length; i++) {
+                    if (d.files[i].name && d.files[i].path) {
+                        pathsByName[String(d.files[i].name).trim().toLowerCase()] = d.files[i].path
+                    }
+                    if (d.files[i].id) {
+                        ids.push(d.files[i].id)
+                        paths[String(d.files[i].id)] = d.files[i].path
+                    }
+                }
+                root.downloadedIds = ids
+                root.downloadedPaths = paths
+                root.downloadedPathsByName = pathsByName
+                console.log("[download] 已加载", ids.length, "首已下载歌曲")
+            }
+        }, function(e) { console.log("[download] 加载已下载列表失败:", e) })
+    }
+
     function checkLogin() {
         if (loginCheckInProgress) return
         loginCheckInProgress = true
@@ -353,8 +392,11 @@ if (item) item.load(id)
             if (d.code === 200 && d.profile) {
                 isLoggedIn = true
                 userInfo = d.profile
-                console.log("[login] 登录成功，开始签到...")
-                autoSignin()
+                offlineMode = !!d.offline   // server 侧已标记来自缓存
+                console.log("[login] 登录成功" + (offlineMode ? "（离线缓存）" : "") + "，开始签到...")
+                // 离线时跳过签到（上游不可达会白等超时）
+                if (!offlineMode) autoSignin()
+                loadDownloadedIds()
             } else {
                 isLoggedIn = false
                 userInfo = null
@@ -364,6 +406,27 @@ if (item) item.load(id)
             loginCheckInProgress = false
             console.log("[login] 检查登录状态错误:", e)
         })
+    }
+
+    // 切换离线模式：开启后用户信息（登录态/详情/等级/歌单）走本地缓存，
+    // 联网后切回正常模式即自动更新缓存
+    function setOfflineMode(on) {
+        ApiClient.setOfflineMode(on, function(d) {
+            if (d && d.code === 200) {
+                root.offlineMode = !!d.offline
+                root.showToast(root.offlineMode ? "已开启离线模式（使用缓存数据）" : "已关闭离线模式")
+                checkLogin()
+            } else {
+                root.showToast("设置失败")
+            }
+        }, function(e) {
+            root.showToast("设置离线模式失败: " + e)
+        })
+    }
+
+    function localPathForSong(song) {
+        if (!song) return ""
+        return root.downloadedPaths[String(song.id)] || root.downloadedPathsByName[String(song.name || "").trim().toLowerCase()] || ""
     }
 
     // 自动签到（每天一次，+3经验）
@@ -398,12 +461,18 @@ if (item) item.load(id)
     function playSong(song, contextSongs) {
         if (!song || !song.id) return
         if (contextSongs && contextSongs.length > 0) playlist = contextSongs
+        song.localPath = root.localPathForSong(song)
+        song.downloaded = song.localPath !== ""
         currentSong = song
         var exists = -1
-        for (var i = 0; i < playlist.length; i++) {
-            if (playlist[i].id === song.id) { exists = i; break }
+        for (var i2 = 0; i2 < playlist.length; i2++) {
+            if (playlist[i2].id == song.id) { exists = i2; break }
         }
-        if (exists >= 0) currentIndex = exists
+        if (exists >= 0) {
+            currentIndex = exists
+            playlist[exists].localPath = song.localPath
+            playlist[exists].downloaded = song.downloaded
+        }
         else { playlist.push(song); currentIndex = playlist.length - 1 }
         navigateTo("player")
     }
@@ -419,13 +488,36 @@ if (item) item.load(id)
     function playNext() {
         if (playlist.length === 0) return
         currentIndex = (currentIndex + 1) % playlist.length
-        currentSong = playlist[currentIndex]
+        var s = playlist[currentIndex]
+        s.localPath = root.localPathForSong(s)
+        s.downloaded = s.localPath !== ""
+        currentSong = s
+    }
+
+    // 自动续播：按歌单顺序找下一首「已下载」的歌；找到返回 true
+    function playNextDownloaded() {
+        if (playlist.length === 0) return false
+        for (var idx = currentIndex + 1; idx < playlist.length; idx++) {
+            var s = playlist[idx]
+            var p = root.localPathForSong(s)
+            if (p && p !== "") {
+                s.localPath = p
+                s.downloaded = true
+                currentIndex = idx
+                currentSong = s
+                return true
+            }
+        }
+        return false
     }
 
     function playPrev() {
         if (playlist.length === 0) return
         currentIndex = (currentIndex - 1 + playlist.length) % playlist.length
-        currentSong = playlist[currentIndex]
+        var s = playlist[currentIndex]
+        s.localPath = root.localPathForSong(s)
+        s.downloaded = s.localPath !== ""
+        currentSong = s
     }
 
     function downloadSong(song, includeLyrics) {
@@ -435,11 +527,42 @@ if (item) item.load(id)
         transferLabel = "下载"
         transferFileName = song.name || ""
         transferStatusTimer.restart()
-        ApiClient.download(song.id, song.name, song.artist, !!includeLyrics, function(d) {
+        // 下载歌曲时一律同时下载同名 .lrc 文件，与歌曲放在同一目录
+        ApiClient.download(song.id, song.name, song.artist, true, function(d) {
             transferBusy = false
             transferProgress = 1
             transferLabel = "下载完成"
-            var msg = d.code === 200 ? (includeLyrics ? "下载完成：音频 + 歌词" : "下载完成") : "下载失败: " + (d.msg || "")
+            var ok = d && d.code === 200
+            var lrcPath = d && d.lrcPath ? d.lrcPath : ""
+            if (!lrcPath && d && d.path) lrcPath = d.path.replace(/\.[^.]+$/i, ".lrc")
+            if (song) {
+                song.downloaded = ok
+                song.localPath = d && d.path ? d.path : ""
+                song.localLrcPath = ok ? lrcPath : ""
+                song.hasLrc = !!(d && d.lrc)
+            }
+            if (ok) {
+                root.downloadedPaths[String(song.id)] = d.path || song.localPath || ""
+                root.downloadedPathsByName[String(song.name || "").trim().toLowerCase()] = d.path || song.localPath || ""
+                var found = false
+                for (var di = 0; di < root.downloadedIds.length; di++) {
+                    if (root.downloadedIds[di] == song.id) { found = true; break }
+                }
+                if (!found) root.downloadedIds.push(song.id)
+            }
+            for (var pi = 0; pi < playlist.length; pi++) {
+                if (playlist[pi].id == song.id) {
+                    playlist[pi].downloaded = ok
+                    playlist[pi].localPath = song.localPath
+                    playlist[pi].localLrcPath = song.localLrcPath
+                    break
+                }
+            }
+            if (currentSong && currentSong.id == song.id) currentSong = song
+            var msg
+            if (!ok) msg = "下载失败: " + ((d && d.msg) || "")
+            else if (song && song.hasLrc) msg = "下载完成：歌曲 + 歌词（同目录同名）"
+            else msg = "下载完成（该歌曲暂无歌词）"
             showToast(msg)
             transferStatusTimer.stop()
         }, function(e) {
@@ -448,7 +571,7 @@ if (item) item.load(id)
             transferStatusTimer.stop()
             showToast("下载错误: " + e)
         })
-        showToast((includeLyrics ? "开始下载：" : "开始下载：") + song.name + (includeLyrics ? "（含歌词）" : ""))
+        showToast("开始下载：" + song.name + "（含歌词）")
     }
 
     function pollTransferStatus() {
@@ -529,8 +652,10 @@ if (item) item.load(id)
         id: toast
         anchors.bottom: parent.bottom; anchors.horizontalCenter: parent.horizontalCenter
         anchors.bottomMargin: 55
-        width: toastText.implicitWidth + 16; height: 24
-        color: "#cc000000"; radius: 12
+        width: toastText.implicitWidth + 18; height: 26
+        color: "#cc000000"; radius: 13
+        border.color: Theme.withAlpha(Theme.primary, 0.4)
+        border.width: 1
         visible: false
         Text { id: toastText; anchors.centerIn: parent; color: "white"; font.pixelSize: Theme.fontSmall; font.family: Theme.fontFamily }
     }

@@ -4,7 +4,7 @@ import "../components"
 
 /**
  * 播放器页面
- * 功能：歌曲播放、歌词显示、听歌记录提交、下载
+ * 功能：歌曲播放、听歌记录提交、下载
  */
 Rectangle {
     id: playerPage
@@ -18,19 +18,18 @@ Rectangle {
     signal prevSong()
     signal nextSong()
     signal downloadRequested(var song, bool withLyrics)
+    signal autoNext()               // 播放结束后请求自动续播下一首
 
     // ── 属性 ──
     property NeteasePlayer player: null
     property var currentSong: null
     property var playlist: []       // 播放列表
     property int currentIndex: 0    // 当前播放索引
-    property string lyricText: ""
-    property var lyricLines: []
-    property int lyricIndex: -1
     property bool loadingUrl: false
     property string playUrl: ""
     property bool caching: false
     property string playState: "idle"    // idle/loading/playing/error
+    property bool autoPlayNext: false    // 本次切歌由播放结束自动触发，切完直接播放
 
     // 听歌记录相关
     property int playStartTime: 0      // 实际开始播放的时间戳
@@ -57,15 +56,13 @@ Rectangle {
     }
 
     function resetPlaybackState() {
+        playerPage.autoPlayNext = false
         playerPage.playStarted = false
         playerPage.playStartTime = 0
         playerPage.lastSongId = null
         playerPage.caching = false
         playerPage.loadingUrl = false
         playerPage.playUrl = ""
-        playerPage.lyricText = ""
-        playerPage.lyricLines = []
-        playerPage.lyricIndex = -1
     }
 
     // ── 播放器信号监听 ──
@@ -83,10 +80,11 @@ Rectangle {
             }
         }
         function onFinished() {
-            // 播放完成：提交记录 + 自动下一首
             flushScrobble()
-            playerPage.setPlayState("idle", "播放完成")
-            playerPage.nextSong()
+            playerPage.caching = false
+            // 播放结束后按歌单顺序自动续播下一首
+            playerPage.autoPlayNext = true
+            playerPage.autoNext()
         }
         function onErrorOccurred(msg) {
             playerPage.setPlayState("error", "错误: " + msg)
@@ -95,18 +93,31 @@ Rectangle {
         }
     }
 
-    // ── 歌曲切换处理 ──
+    // ── 歌曲切换处理：默认不播放，等待用户下载完成后手动播放 ──
     onCurrentSongChanged: {
         console.log("[PlayerPage] currentSong changed:",
                     currentSong ? currentSong.name : "null",
                     "player:", player ? "valid" : "null")
-        // 切换歌曲时，先提交上一首歌的记录
         flushScrobble()
         if (currentSong && currentSong.id) {
             lastSongId = currentSong.id
             playStarted = false
-            setPlayState("loading", "获取播放地址...")
-            loadAndPlay()
+            // 切歌时唱片旋转归零
+            if (discPlate) discPlate.rotation = 0
+            if (playerPage.autoPlayNext === true) {
+                // 自动续播/按下一首：直接开始播放，不需要用户再点播放
+                playerPage.autoPlayNext = false
+                if (currentSong.downloaded === true) {
+                    setPlayState("loading", "正在播放下一首...")
+                    loadAndPlay()
+                } else {
+                    setPlayState("idle", "下一首还未下载，请先下载")
+                }
+            } else if (currentSong.downloaded === true) {
+                setPlayState("idle", "已下载，可点击播放")
+            } else {
+                setPlayState("idle", "已选中，下载后再点击播放")
+            }
         } else {
             resetPlaybackState()
         }
@@ -140,98 +151,23 @@ Rectangle {
         playStarted = false
     }
 
-    // ======================================================================
-    // 播放相关函数
-    // ======================================================================
-
-    /**
-     * 获取播放地址并开始播放
-     */
     function loadAndPlay() {
         if (!currentSong || !currentSong.id) return
-        console.log("[PlayerPage] loadAndPlay start, song:", currentSong.name)
+        if (currentSong.downloaded !== true || !currentSong.localPath) {
+            playerPage.setPlayState("idle", "请先下载歌曲，再点击播放")
+            return
+        }
 
-        playerPage.loadingUrl = true
+        console.log("[PlayerPage] playing local file:", currentSong.localPath)
+        playerPage.loadingUrl = false
         playerPage.caching = false
-        playerPage.setPlayState("loading", "获取播放地址...")
-        lyricText = ""
-        lyricLines = []
-        lyricIndex = -1
+        playerPage.setPlayState("loading", "正在打开本地歌曲...")
 
-        ApiClient.songUrl(currentSong.id, function(d) {
-            playerPage.loadingUrl = false
-            if (d.code === 200 && d.data && d.data[0] && d.data[0].url) {
-                playerPage.playUrl = d.data[0].url
-                playerPage.caching = false
-                playerPage.setPlayState("loading", "正在播放...")
-                console.log("[PlayerPage] got url, calling player.play")
-                if (player) {
-                    player.play(playerPage.playUrl)
-                } else {
-                    playerPage.caching = false
-                    playerPage.setPlayState("error", "播放器初始化失败")
-                    console.log("[PlayerPage] ERROR: player is null!")
-                }
-                loadLyric(currentSong.id)
-            } else {
-                playerPage.setPlayState("error", "无法播放（可能需要 VIP）")
-                console.log("[PlayerPage] no url in response")
-            }
-        }, function(e) {
-            playerPage.loadingUrl = false
-            playerPage.setPlayState("error", "获取地址失败: " + e)
-            console.log("[PlayerPage] songUrl error:", e)
-        })
-    }
-
-    // ======================================================================
-    // 歌词相关函数
-    // ======================================================================
-
-    /**
-     * 加载歌词
-     */
-    function loadLyric(id) {
-        ApiClient.lyric(id, function(d) {
-            if (d.code === 200 && d.lrc && d.lrc.lyric) {
-                parseLyric(d.lrc.lyric)
-            }
-        }, null)
-    }
-
-    /**
-     * 解析 LRC 格式歌词
-     */
-    function parseLyric(lrc) {
-        var lines = lrc.split("\n")
-        var result = []
-        for (var i = 0; i < lines.length; i++) {
-            var m = lines[i].match(/\[(\d+):(\d+)\.(\d+)\](.*)/)
-            if (m) {
-                var t = parseInt(m[1]) * 60000
-                        + parseInt(m[2]) * 1000
-                        + parseInt(m[3]) * 10
-                result.push({ time: t, text: m[4].trim() })
-            }
+        if (!player) {
+            playerPage.setPlayState("error", "播放器初始化失败")
+            return
         }
-        result.sort(function(a, b) { return a.time - b.time })
-        playerPage.lyricLines = result
-    }
-
-    /**
-     * 根据播放位置更新当前歌词
-     */
-    function updateLyric(pos) {
-        if (lyricLines.length === 0) return
-        for (var i = lyricLines.length - 1; i >= 0; i--) {
-            if (pos >= lyricLines[i].time) {
-                if (i !== lyricIndex) {
-                    lyricIndex = i
-                    lyricText = lyricLines[i].text
-                }
-                break
-            }
-        }
+        player.play(currentSong.localPath)
     }
 
     // ======================================================================
@@ -260,8 +196,8 @@ Rectangle {
 
             // 返回按钮
             Rectangle {
-                width: 22
-                height: 22
+                width: 26
+                height: 26
                 anchors.verticalCenter: parent.verticalCenter
                 color: backMouse.pressed ? Theme.withAlpha(Theme.primary, 0.2) : "transparent"
                 radius: Theme.radiusSmall
@@ -308,9 +244,10 @@ Rectangle {
 
             Item { width: 1 }
 
+            // 上一首
             Rectangle {
-                width: 24
-                height: 20
+                width: 28
+                height: 26
                 anchors.verticalCenter: parent.verticalCenter
                 color: prevMouse.pressed ? Theme.withAlpha(Theme.primary, 0.2) : "transparent"
                 radius: Theme.radiusSmall
@@ -319,6 +256,7 @@ Rectangle {
                     text: "|<"
                     color: playerPage.playlist.length > 1 ? Theme.textPrimary : Theme.textTertiary
                     font.pixelSize: Theme.fontTiny
+                    font.family: Theme.fontFamily
                 }
                 MouseArea {
                     id: prevMouse
@@ -328,9 +266,10 @@ Rectangle {
                 }
             }
 
+            // 下一首
             Rectangle {
-                width: 24
-                height: 20
+                width: 28
+                height: 26
                 anchors.verticalCenter: parent.verticalCenter
                 color: nextMouse.pressed ? Theme.withAlpha(Theme.primary, 0.2) : "transparent"
                 radius: Theme.radiusSmall
@@ -339,39 +278,13 @@ Rectangle {
                     text: ">|"
                     color: playerPage.playlist.length > 1 ? Theme.textPrimary : Theme.textTertiary
                     font.pixelSize: Theme.fontTiny
+                    font.family: Theme.fontFamily
                 }
                 MouseArea {
                     id: nextMouse
                     anchors.fill: parent
                     enabled: playerPage.playlist.length > 1
                     onClicked: playerPage.nextSong()
-                }
-            }
-
-            // 下载按钮
-            Rectangle {
-                width: 36
-                height: 20
-                anchors.verticalCenter: parent.verticalCenter
-                color: downloadMouse.pressed ? Theme.primaryDark : Theme.primary
-                radius: Theme.radiusRound
-
-                scale: downloadMouse.pressed ? 0.93 : 1.0
-                Behavior on scale { NumberAnimation { duration: 80 } }
-
-                Text {
-                    anchors.centerIn: parent
-                    text: "下载"
-                    color: Theme.textOnPrimary
-                    font.pixelSize: Theme.fontTiny
-                    font.family: Theme.fontFamily
-                    font.bold: true
-                }
-
-                MouseArea {
-                    id: downloadMouse
-                    anchors.fill: parent
-                    onClicked: if (currentSong) playerPage.showDownloadChoice()
                 }
             }
         }
@@ -386,12 +299,13 @@ Rectangle {
 
         Rectangle {
             width: 240
-            height: 120
+            height: 132
             radius: 10
             color: Theme.bgCard
             anchors.centerIn: parent
             border.color: Theme.borderLight
             border.width: 1
+            z: 1
 
             Column {
                 anchors.fill: parent
@@ -416,34 +330,26 @@ Rectangle {
                     maximumLineCount: 1
                 }
 
+                Text {
+                    text: "将同时下载同名 .lrc 歌词文件"
+                    color: Theme.textTertiary
+                    font.pixelSize: Theme.fontTiny
+                    font.family: Theme.fontFamily
+                    elide: Text.ElideRight
+                    width: parent.width
+                    maximumLineCount: 1
+                }
+
                 Row {
                     spacing: 8
                     Rectangle {
-                        width: 74
-                        height: 24
-                        radius: 4
-                        color: Theme.bgTertiary
-                        Text {
-                            anchors.centerIn: parent
-                            text: "仅音频"
-                            color: Theme.textPrimary
-                            font.pixelSize: Theme.fontTiny
-                            font.family: Theme.fontFamily
-                        }
-                        MouseArea {
-                            anchors.fill: parent
-                            onClicked: playerPage.startDownload(false)
-                        }
-                    }
-
-                    Rectangle {
-                        width: 82
+                        width: 108
                         height: 24
                         radius: 4
                         color: Theme.primary
                         Text {
                             anchors.centerIn: parent
-                            text: "音频 + 歌词"
+                            text: "下载歌曲 + 歌词"
                             color: "white"
                             font.pixelSize: Theme.fontTiny
                             font.family: Theme.fontFamily
@@ -482,7 +388,7 @@ Rectangle {
         }
     }
 
-    // ── 主内容区：歌曲信息 + 歌词 ──
+    // ── 主内容区 ──
     Column {
         id: contentColumn
         anchors.top: topBar.bottom
@@ -492,10 +398,10 @@ Rectangle {
         anchors.margins: Theme.spacingMedium
         spacing: Theme.spacingSmall
 
-        // 歌曲信息卡片
+        // 歌曲信息卡片（旋转唱片 + 歌名/歌手/专辑）
         Rectangle {
             width: parent.width
-            height: 56
+            height: 74
             color: Theme.bgCard
             radius: Theme.radiusMedium
             border.color: Theme.borderLight
@@ -506,35 +412,106 @@ Rectangle {
                 anchors.margins: Theme.spacingSmall
                 spacing: Theme.spacingMedium
 
-                // 专辑封面
-                Rectangle {
-                    width: 40
-                    height: 40
-                    radius: Theme.radiusSmall
-                    color: Theme.bgTertiary
+                // ── 唱片区：旋转黑胶 + 居中方形封面 + 中心轴 ──
+                Item {
+                    width: 66
+                    height: 66
                     anchors.verticalCenter: parent.verticalCenter
 
-                    Image {
+                    // 旋转黑胶（Canvas 一次绘制唱片纹路，整体旋转）
+                    Canvas {
+                        id: discPlate
                         anchors.fill: parent
-                        source: currentSong && currentSong.cover ? currentSong.cover : ""
-                        fillMode: Image.PreserveAspectCrop
-                        asynchronous: true
-                        visible: currentSong != null && currentSong.cover != ""
+                        antialiasing: true
+                        onPaint: {
+                            var ctx = getContext("2d")
+                            ctx.clearRect(0, 0, width, height)
+                            var c = width / 2
+                            ctx.beginPath()
+                            ctx.arc(c, c, c - 1, 0, Math.PI * 2)
+                            ctx.fillStyle = "#151515"
+                            ctx.fill()
+                            ctx.lineWidth = 1
+                            for (var r = 7; r < c - 1; r += 4) {
+                                ctx.beginPath()
+                                ctx.arc(c, c, r, 0, Math.PI * 2)
+                                ctx.strokeStyle = "#2E2E2E"
+                                ctx.stroke()
+                            }
+                            ctx.beginPath()
+                            ctx.arc(c, c, 3, 0, Math.PI * 2)
+                            ctx.fillStyle = "#0D0D0D"
+                            ctx.fill()
+                        }
+                        onWidthChanged: requestPaint()
+                        onHeightChanged: requestPaint()
+
+                        RotationAnimation on rotation {
+                            running: playerPage.playState === "playing"
+                            loops: Animation.Infinite
+                            from: 0
+                            to: 360
+                            duration: 9000
+                            easing.type: Easing.Linear
+                        }
                     }
 
-                    Text {
+                    // 播放中发光环
+                    Rectangle {
                         anchors.centerIn: parent
-                        text: "♪"
-                        color: Theme.textTertiary
-                        font.pixelSize: Theme.fontLarge
-                        visible: currentSong == null || currentSong.cover == ""
+                        width: 60
+                        height: 60
+                        radius: 30
+                        color: "transparent"
+                        border.color: Theme.primaryGlow
+                        border.width: 2
+                        visible: playerPage.playState === "playing"
+                    }
+
+                    // 居中封面
+                    Rectangle {
+                        width: 46
+                        height: 46
+                        radius: 10
+                        clip: true
+                        color: Theme.bgTertiary
+                        anchors.centerIn: parent
+                        z: 1
+
+                        Image {
+                            anchors.fill: parent
+                            source: currentSong && currentSong.cover ? currentSong.cover : ""
+                            fillMode: Image.PreserveAspectCrop
+                            asynchronous: true
+                            visible: currentSong != null && currentSong.cover != ""
+                        }
+
+                        Text {
+                            anchors.centerIn: parent
+                            text: "♪"
+                            color: Theme.textTertiary
+                            font.pixelSize: Theme.fontLarge
+                            visible: currentSong == null || currentSong.cover == ""
+                        }
+                    }
+
+                    // 中心轴
+                    Rectangle {
+                        width: 7
+                        height: 7
+                        radius: 4
+                        color: "#F0F0F0"
+                        border.color: Theme.primary
+                        border.width: 1
+                        anchors.centerIn: parent
+                        z: 2
                     }
                 }
 
                 // 歌曲信息（歌名/歌手/专辑）
                 Column {
                     anchors.verticalCenter: parent.verticalCenter
-                    width: parent.width - 56
+                    width: parent.width - 82
                     spacing: 2
 
                     Text {
@@ -569,61 +546,104 @@ Rectangle {
             }
         }
 
-        // 加载/缓存状态提示
+        // ── 状态提示行（始终可见）──
         Row {
-            visible: playerPage.caching || playerPage.loadingUrl
             width: parent.width
             spacing: 6
 
+            // 加载中旋转点
             Rectangle {
-                width: 12
-                height: 12
-                radius: 6
+                width: 10
+                height: 10
+                radius: 5
                 color: Theme.primary
+                visible: playerPage.caching || playerPage.loadingUrl
                 RotationAnimation on rotation {
-                    running: true
+                    running: visible
                     duration: 1000
                     from: 0
                     to: 360
                     loops: Animation.Infinite
                 }
             }
+
             Text {
-                text: playerPage.loadingUrl ? "获取播放地址..." : "正在缓存下载..."
-                color: Theme.primary
+                id: statusText
+                text: "就绪"
+                color: playerPage.playState === "error" ? Theme.error
+                      : (playerPage.playState === "loading" ? Theme.primary : Theme.textSecondary)
                 font.pixelSize: Theme.fontSmall
                 font.family: Theme.fontFamily
                 anchors.verticalCenter: parent.verticalCenter
+                elide: Text.ElideRight
+                maximumLineCount: 1
+                width: parent.width - 16
             }
         }
 
-        // 歌词显示区域
-        Rectangle {
+        // ── 操作按钮行：播放 + 下载 ──
+        Row {
             width: parent.width
-            height: parent.height - 80
-            color: Theme.bgCard
-            radius: Theme.radiusMedium
-            border.color: Theme.borderLight
-            border.width: 0.5
-            visible: !playerPage.caching && !playerPage.loadingUrl
+            spacing: Theme.spacingMedium
 
-            Text {
-                id: lyricDisplay
-                anchors.centerIn: parent
-                anchors.leftMargin: 10
-                anchors.rightMargin: 10
-                text: lyricText || statusText.text || "暂无歌词"
-                color: Theme.textSecondary
-                font.pixelSize: Theme.fontSmall
-                font.family: Theme.fontFamily
-                horizontalAlignment: Text.AlignHCenter
-                verticalAlignment: Text.AlignVCenter
-                wrapMode: Text.WordWrap
-                width: parent.width - 20
+            // 播放按钮
+            Rectangle {
+                width: (parent.width - Theme.spacingMedium) / 2
+                height: 30
+                radius: Theme.radiusRound
+                color: playMouse.pressed ? Theme.primaryDark : Theme.primary
+                enabled: currentSong && currentSong.downloaded === true
+                opacity: enabled ? 1 : 0.45
+
+                scale: playMouse.pressed ? 0.97 : 1.0
+                Behavior on scale { NumberAnimation { duration: 80 } }
+                Behavior on color { ColorAnimation { duration: 100 } }
+
+                Text {
+                    anchors.centerIn: parent
+                    text: playerPage.playState === "playing" ? "重新播放" : "播放"
+                    color: Theme.textOnPrimary
+                    font.pixelSize: Theme.fontBody
+                    font.bold: true
+                    font.family: Theme.fontFamily
+                }
+
+                MouseArea {
+                    id: playMouse
+                    anchors.fill: parent
+                    enabled: currentSong && currentSong.downloaded === true
+                    onClicked: if (currentSong && currentSong.downloaded === true) playerPage.loadAndPlay()
+                }
+            }
+
+            // 下载按钮
+            Rectangle {
+                width: (parent.width - Theme.spacingMedium) / 2
+                height: 30
+                radius: Theme.radiusRound
+                color: downloadMouse.pressed ? Theme.bgCardHover : Theme.bgCard
+                border.color: Theme.primary
+                border.width: 1
+
+                scale: downloadMouse.pressed ? 0.97 : 1.0
+                Behavior on scale { NumberAnimation { duration: 80 } }
+                Behavior on color { ColorAnimation { duration: 100 } }
+
+                Text {
+                    anchors.centerIn: parent
+                    text: (currentSong && currentSong.downloaded === true) ? "已下载 ✓" : "下载"
+                    color: (currentSong && currentSong.downloaded === true) ? Theme.success : Theme.primary
+                    font.pixelSize: Theme.fontBody
+                    font.bold: true
+                    font.family: Theme.fontFamily
+                }
+
+                MouseArea {
+                    id: downloadMouse
+                    anchors.fill: parent
+                    onClicked: if (currentSong) playerPage.showDownloadChoice()
+                }
             }
         }
     }
-
-    // 隐藏的状态文本（用于歌词后备显示）
-    Text { id: statusText; visible: false; text: "就绪" }
 }

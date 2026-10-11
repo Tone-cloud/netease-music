@@ -101,7 +101,7 @@ Rectangle {
 
         delegate: Rectangle {
             width: toplistList.width
-            height: 28
+            height: 34
             color: index % 2 === 0 ? Theme.bgPrimary : Theme.bgCard
 
             scale: itemMouse.pressed ? 0.98 : 1.0

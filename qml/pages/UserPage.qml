@@ -13,13 +13,34 @@ Rectangle {
     signal openLocal()
     signal openLogin()
     signal logout()
+    signal toggleOfflineMode(bool on)
 
     property var userInfo: null
     property var userDetail: null
     property var userLevel: null
     property var userPlaylists: []
     property bool loading: false
+    property bool offlineMode: false   // 离线模式：用户信息走本地缓存
     readonly property bool isLoggedIn: userPage.userInfo !== null
+    readonly property string vipLabel: {
+        var t = 0, lv = 0, redLv = 0, assoc = false
+        if (userPage.userDetail) {
+            var p = userPage.userDetail.profile || {}
+            t = p.vipType || 0
+            lv = p.redVipLevel || 0
+            var r = p.vipRights || {}
+            assoc = !!r.associator
+            redLv = r.redVipLevel || 0
+            if (!t && userPage.userDetail.account) t = userPage.userDetail.account.vipType || 0
+        }
+        if (!t && userPage.userInfo) t = userPage.userInfo.vipType || 0
+        // vipType: 10/11 = 黑胶VIP，12 及以上才是黑胶SVIP
+        // （旧判断用 vipType>=11，会把只有黑胶VIP的账号误显示成黑胶SVIP）
+        if (t >= 12) return "黑胶SVIP"
+        if (t > 0 || lv > 0 || redLv > 0 || assoc) return "黑胶VIP"
+        return ""
+    }
+    readonly property bool isVip: userPage.vipLabel.length > 0
 
     // ── 顶部栏 ──
     Rectangle {
@@ -71,6 +92,26 @@ Rectangle {
                 font.pixelSize: Theme.fontNormal
                 font.bold: true
                 font.family: Theme.fontFamily
+            }
+
+            // 离线模式徽标（顶栏右侧，进入即见当前状态）
+            Rectangle {
+                visible: userPage.offlineMode
+                width: offlineBadgeText.width + 12
+                height: 16
+                radius: 8
+                anchors.verticalCenter: parent.verticalCenter
+                color: Theme.warning
+
+                Text {
+                    id: offlineBadgeText
+                    anchors.centerIn: parent
+                    text: "离线模式 · 缓存数据"
+                    color: "white"
+                    font.pixelSize: Theme.fontTiny
+                    font.bold: true
+                    font.family: Theme.fontFamily
+                }
             }
         }
     }
@@ -126,7 +167,7 @@ Rectangle {
 
                 Rectangle {
                     width: parent.width
-                    height: 60
+                    height: 66
                     color: Theme.bgCard
                     radius: Theme.radiusLarge
                     border.color: Theme.borderLight
@@ -180,152 +221,169 @@ Rectangle {
                 // ══ 用户信息卡片 ══
                 Rectangle {
                     width: parent.width
-                    height: 90
+                    height: 96
                     color: Theme.bgCard
                     radius: Theme.radiusLarge
                     border.color: Theme.borderLight
                     border.width: 0.5
 
-                    Row {
+                    Column {
                         anchors.fill: parent
                         anchors.margins: 10
-                        spacing: 10
 
-                        // 头像
-                        Rectangle {
-                            width: 48
-                            height: 48
-                            radius: 24
-                            clip: true
-                            color: Theme.bgTertiary
-                            anchors.verticalCenter: parent.verticalCenter
+                        Row {
+                            width: parent.width
+                            spacing: 10
 
-                            Image {
-                                id: avatarImage
-                                anchors.fill: parent
-                                source: userPage.userInfo ? (userPage.userInfo.avatarUrl || userPage.userInfo.avatarImgUrl || "") : ""
-                                fillMode: Image.PreserveAspectCrop
-                                asynchronous: true
-                                cache: true
-                                sourceSize.width: 96
-                                sourceSize.height: 96
-                            }
+                            // 头像
+                            Rectangle {
+                                width: 48
+                                height: 48
+                                radius: 24
+                                clip: true
+                                color: Theme.bgTertiary
+                                anchors.verticalCenter: parent.verticalCenter
 
-                            Text {
-                                anchors.centerIn: parent
-                                text: userPage.userInfo && userPage.userInfo.nickname ? userPage.userInfo.nickname.charAt(0) : "U"
-                                color: Theme.textSecondary
-                                font.pixelSize: Theme.fontMedium
-                                font.bold: true
-                                font.family: Theme.fontFamily
-                                visible: !avatarImage.status || avatarImage.status === Image.Error
-                            }
-                        }
-
-                        // 用户信息
-                        Column {
-                            anchors.verticalCenter: parent.verticalCenter
-                            spacing: 3
-                            width: parent.parent.width - 68
-
-                            // 昵称 + 等级 + VIP
-                            Row {
-                                width: parent.width
-                                spacing: 6
+                                Image {
+                                    id: avatarImage
+                                    anchors.fill: parent
+                                    source: userPage.userInfo ? (userPage.userInfo.avatarUrl || userPage.userInfo.avatarImgUrl || "") : ""
+                                    fillMode: Image.PreserveAspectCrop
+                                    asynchronous: true
+                                    cache: true
+                                    sourceSize.width: 96
+                                    sourceSize.height: 96
+                                }
 
                                 Text {
-                                    text: userPage.userInfo ? userPage.userInfo.nickname : ""
-                                    color: Theme.textPrimary
-                                    font.pixelSize: Theme.fontNormal
+                                    anchors.centerIn: parent
+                                    text: userPage.userInfo && userPage.userInfo.nickname ? userPage.userInfo.nickname.charAt(0) : "U"
+                                    color: Theme.textSecondary
+                                    font.pixelSize: Theme.fontMedium
                                     font.bold: true
                                     font.family: Theme.fontFamily
+                                    visible: !avatarImage.status || avatarImage.status === Image.Error
+                                }
+                            }
+
+                            // 昵称 + 等级 + VIP
+                            Column {
+                                width: parent.width - 58
+                                spacing: 3
+                                anchors.verticalCenter: parent.verticalCenter
+
+                                // 昵称行
+                                Row {
+                                    width: parent.width
+                                    spacing: 6
+
+                                    Text {
+                                        width: parent.width
+                                            - (levelBadge.visible ? levelBadge.width + 6 : 0)
+                                            - (vipBadge.visible ? vipBadge.width + 6 : 0)
+                                        text: userPage.userInfo ? userPage.userInfo.nickname : ""
+                                        color: Theme.textPrimary
+                                        font.pixelSize: Theme.fontNormal
+                                        font.bold: true
+                                        font.family: Theme.fontFamily
+                                        elide: Text.ElideRight
+                                        maximumLineCount: 1
+                                    }
+
+                                    // 等级标签
+                                    Rectangle {
+                                        id: levelBadge
+                                        visible: userPage.userLevel && userPage.userLevel.level
+                                        width: levelText.width + 10
+                                        height: 14
+                                        radius: 7
+                                        color: Theme.withAlpha(Theme.primary, 0.15)
+                                        anchors.verticalCenter: parent.verticalCenter
+
+                                        Text {
+                                            id: levelText
+                                            anchors.centerIn: parent
+                                            text: "Lv." + (userPage.userLevel ? userPage.userLevel.level : 0)
+                                            color: Theme.primary
+                                            font.pixelSize: Theme.fontTiny
+                                            font.family: Theme.fontFamily
+                                            font.bold: true
+                                        }
+                                    }
+
+                                    // VIP 标签
+                                    Rectangle {
+                                        id: vipBadge
+                                        visible: userPage.isVip
+                                        width: vipText.width + 10
+                                        height: 14
+                                        radius: 7
+                                        color: "#D4AF37"
+                                        anchors.verticalCenter: parent.verticalCenter
+
+                                        Text {
+                                            id: vipText
+                                            anchors.centerIn: parent
+                                            text: userPage.vipLabel
+                                            color: "white"
+                                            font.pixelSize: Theme.fontTiny
+                                            font.family: Theme.fontFamily
+                                            font.bold: true
+                                        }
+                                    }
+                                }
+
+                                // 签名
+                                Text {
+                                    text: userPage.userDetail && userPage.userDetail.profile ? (userPage.userDetail.profile.signature || "这个人很懒，什么都没写") : "加载中..."
+                                    color: Theme.textSecondary
+                                    font.pixelSize: Theme.fontTiny
+                                    font.family: Theme.fontFamily
                                     elide: Text.ElideRight
+                                    width: parent.width
                                     maximumLineCount: 1
                                 }
 
-                                // 等级标签
-                                Rectangle {
-                                    visible: userPage.userLevel && userPage.userLevel.level
-                                    width: levelText.width + 10
-                                    height: 14
-                                    radius: 7
-                                    color: Theme.withAlpha(Theme.primary, 0.15)
-                                    anchors.verticalCenter: parent.verticalCenter
+                                // 数据统计：关注 / 粉丝 / 累计听歌
+                                Row {
+                                    width: parent.width
+                                    spacing: 4
 
                                     Text {
-                                        id: levelText
-                                        anchors.centerIn: parent
-                                        text: "Lv." + (userPage.userLevel ? userPage.userLevel.level : 0)
-                                        color: Theme.primary
+                                        width: parent.width / 3
+                                        text: "关注 " + (userPage.userDetail && userPage.userDetail.profile ? userPage.userDetail.profile.follows : 0)
+                                        color: Theme.textTertiary
                                         font.pixelSize: Theme.fontTiny
                                         font.family: Theme.fontFamily
-                                        font.bold: true
+                                        elide: Text.ElideRight
+                                    }
+                                    Text {
+                                        width: parent.width / 3
+                                        text: "粉丝 " + (userPage.userDetail && userPage.userDetail.profile ? userPage.userDetail.profile.followeds : 0)
+                                        color: Theme.textTertiary
+                                        font.pixelSize: Theme.fontTiny
+                                        font.family: Theme.fontFamily
+                                        elide: Text.ElideRight
+                                    }
+                                    Text {
+                                        width: parent.width / 3
+                                        text: "听歌 " + (userPage.userLevel && userPage.userLevel.listenSongs ? userPage.userLevel.listenSongs : 0) + "首"
+                                        color: Theme.textTertiary
+                                        font.pixelSize: Theme.fontTiny
+                                        font.family: Theme.fontFamily
+                                        elide: Text.ElideRight
                                     }
                                 }
 
-                                // VIP 标签
-                                Rectangle {
-                                    visible: userPage.userDetail && userPage.userDetail.account && userPage.userDetail.account.vipType > 0
-                                    width: vipText.width + 10
-                                    height: 14
-                                    radius: 7
-                                    color: "#1a000000"
-                                    anchors.verticalCenter: parent.verticalCenter
-
-                                    Text {
-                                        id: vipText
-                                        anchors.centerIn: parent
-                                        text: "VIP"
-                                        color: "#D4AF37"
-                                        font.pixelSize: Theme.fontTiny
-                                        font.family: Theme.fontFamily
-                                        font.bold: true
-                                    }
-                                }
-                            }
-
-                            // 签名
-                            Text {
-                                text: userPage.userDetail && userPage.userDetail.profile ? (userPage.userDetail.profile.signature || "这个人很懒，什么都没写") : "加载中..."
-                                color: Theme.textSecondary
-                                font.pixelSize: Theme.fontTiny
-                                font.family: Theme.fontFamily
-                                elide: Text.ElideRight
-                                width: parent.width
-                                maximumLineCount: 1
-                            }
-
-                            // 数据统计：关注 / 粉丝 / 累计听歌
-                            Row {
-                                width: parent.width
-                                spacing: 12
-
+                                // VIP 状态
                                 Text {
-                                    text: "关注 " + (userPage.userDetail && userPage.userDetail.profile ? userPage.userDetail.profile.follows : 0)
-                                    color: Theme.textTertiary
+                                    text: userPage.isVip ? "已开通「" + userPage.vipLabel + "」· 会员专享曲库/无损音质" : "未开通会员"
+                                    color: userPage.isVip ? "#D4AF37" : Theme.textTertiary
                                     font.pixelSize: Theme.fontTiny
                                     font.family: Theme.fontFamily
+                                    elide: Text.ElideRight
+                                    width: parent.width
                                 }
-                                Text {
-                                    text: "粉丝 " + (userPage.userDetail && userPage.userDetail.profile ? userPage.userDetail.profile.followeds : 0)
-                                    color: Theme.textTertiary
-                                    font.pixelSize: Theme.fontTiny
-                                    font.family: Theme.fontFamily
-                                }
-                                Text {
-                                    text: "累计听歌 " + (userPage.userLevel && userPage.userLevel.listenSongs ? userPage.userLevel.listenSongs : 0) + "首"
-                                    color: Theme.textTertiary
-                                    font.pixelSize: Theme.fontTiny
-                                    font.family: Theme.fontFamily
-                                }
-                            }
-
-                            // VIP 状态
-                            Text {
-                                text: userPage.userDetail && userPage.userDetail.account && userPage.userDetail.account.vipType > 0 ? "已开通会员" : "未开通会员"
-                                color: userPage.userDetail && userPage.userDetail.account && userPage.userDetail.account.vipType > 0 ? "#D4AF37" : Theme.textTertiary
-                                font.pixelSize: Theme.fontTiny
-                                font.family: Theme.fontFamily
                             }
                         }
                     }
@@ -334,7 +392,7 @@ Rectangle {
                 // ══ 功能入口 ══
                 Repeater {
                     model: [
-                        { label: "本地音乐", action: "local", icon: "🎵" },
+                        { label: "本地音乐", action: "local", icon: "♪" },
                         { label: "退出登录", action: "logout", icon: "↩" }
                     ]
 
@@ -387,6 +445,69 @@ Rectangle {
                                 else if (modelData.action === "logout") userPage.logout()
                             }
                         }
+                    }
+                }
+
+                // ══ 离线模式开关（开启后用户信息走本地缓存，联网后自动更新）══
+                Rectangle {
+                    width: parent.width
+                    height: 28
+                    color: Theme.bgCard
+                    radius: Theme.radiusMedium
+                    border.color: userPage.offlineMode ? Theme.warning : Theme.borderLight
+                    border.width: userPage.offlineMode ? 1 : 0.5
+
+                    Behavior on scale { NumberAnimation { duration: 80 } }
+
+                    Row {
+                        anchors.fill: parent
+                        anchors.leftMargin: 10
+                        anchors.rightMargin: 10
+                        spacing: 8
+
+                        // 图标徽标（纯文本，避免机型缺字形）
+                        Rectangle {
+                            width: 20
+                            height: 20
+                            radius: 10
+                            anchors.verticalCenter: parent.verticalCenter
+                            color: userPage.offlineMode ? Theme.warning : Theme.withAlpha(Theme.primary, 0.15)
+
+                            Text {
+                                anchors.centerIn: parent
+                                text: "离"
+                                color: "white"
+                                font.pixelSize: Theme.fontTiny
+                                font.bold: true
+                                font.family: Theme.fontFamily
+                            }
+                        }
+
+                        Text {
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: "离线模式"
+                            color: Theme.textPrimary
+                            font.pixelSize: Theme.fontSmall
+                            font.family: Theme.fontFamily
+                        }
+
+                        Item { width: 1 }
+
+                        Text {
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: userPage.offlineMode ? "已开启 · 使用缓存，联网后自动更新" : "已关闭"
+                            color: userPage.offlineMode ? Theme.warning : Theme.textTertiary
+                            font.pixelSize: Theme.fontTiny
+                            font.family: Theme.fontFamily
+                            elide: Text.ElideRight
+                            width: Math.min(150, implicitWidth)
+                        }
+                    }
+
+                    MouseArea {
+                        anchors.fill: parent
+                        onPressedChanged: parent.scale = pressed ? 0.98 : 1.0
+                        onClicked: userPage.toggleOfflineMode(!userPage.offlineMode)
                     }
                 }
 

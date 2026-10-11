@@ -4,6 +4,9 @@
 #include <QUrl>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QJsonArray>
+#include <QDirIterator>
+#include <QFile>
 #include <dlfcn.h>
 #include <QFileInfo>
 
@@ -361,6 +364,8 @@ void NeteasePlayer::playWithSystemPlayer(const QString &filePath) {
     typedef bool  (*SetColumnFunc)(void*, const QString&);
     typedef void  (*OnClickedPlayFunc)(void*);
     typedef int   (*PlayStateFunc)(void*);
+    typedef void  (*SetHasLrcFunc)(void*, bool);
+    typedef void  (*CloseRepeatFunc)(void*);
 
     // ========== 获取所有系统符号（通过 ELF .symtab 解析） ==========
     InstanceFunc mediaManagerInstance = (InstanceFunc)resolveSymbol("_ZN10YSingletonI13YMediaManagerE8instanceEv");
@@ -373,6 +378,8 @@ void NeteasePlayer::playWithSystemPlayer(const QString &filePath) {
     ShowPlayerFunc showPlayer = (ShowPlayerFunc)resolveSymbol("_ZN7YGlobal15showAudioPlayerEv");
     OnClickedPlayFunc onClickedPlay = (OnClickedPlayFunc)resolveSymbol("_ZN19YMediaPlayerManager13onClickedPlayEv");
     PlayStateFunc playState = (PlayStateFunc)resolveSymbol("_ZNK19YMediaPlayerManager9playStateEv");
+    SetHasLrcFunc setHasLrc = (SetHasLrcFunc)resolveSymbol("_ZN19YMediaPlayerManager9setHasLrcEb");
+    CloseRepeatFunc closeRepeat = (CloseRepeatFunc)resolveSymbol("_ZN19YMediaPlayerManager11closeRepeatEv");
 
     qDebug() << "[NeteasePlayer] symbols:"
              << "mediaMgrInst=" << (void*)mediaManagerInstance
@@ -430,6 +437,15 @@ void NeteasePlayer::playWithSystemPlayer(const QString &filePath) {
     entity->mDownloadState   = 1;  // DownloadState::SUCCEED (PenMods 枚举值)
     entity->mTitle           = fi.fileName();
     entity->mLocalFile       = filePath;  // mp3 直接用原路径，不需要软链接
+    // 查找同目录同名 .lrc，交给系统播放器显示歌词
+    bool hasLrc = false;
+    {
+        QString lrcPath = fi.absolutePath() + "/" + fi.completeBaseName() + ".lrc";
+        if (QFileInfo::exists(lrcPath)) {
+            entity->mLrcFile = lrcPath;
+            hasLrc = true;
+        }
+    }
     entity->mDuration        = 0;
     entity->mProgress        = 0;
     entity->mSrcAudioVisible = true;
@@ -457,6 +473,15 @@ void NeteasePlayer::playWithSystemPlayer(const QString &filePath) {
             onClickedPlay(mpm);
             qDebug() << "[NeteasePlayer] step7: onClickedPlay done";
         }
+        if (setHasLrc) {
+            setHasLrc(mpm, hasLrc);
+            qDebug() << "[NeteasePlayer] step7: setHasLrc =" << hasLrc << "lrc=" << entity->mLrcFile;
+        }
+        // 关掉单曲循环，否则一首歌播完会从头再放、也不会触发下一首
+        if (closeRepeat) {
+            closeRepeat(mpm);
+            qDebug() << "[NeteasePlayer] step7: closeRepeat done";
+        }
     }
 
     // ========== 清理 ==========
@@ -467,12 +492,67 @@ void NeteasePlayer::playWithSystemPlayer(const QString &filePath) {
     m_usingSystemPlayer = true;
 
     // 启动定时器轮询系统播放器状态，检测播放完成
+    m_sawPlaying = false;
     if (!m_systemPlayerTimer) {
         m_systemPlayerTimer = new QTimer(this);
         connect(m_systemPlayerTimer, &QTimer::timeout, this, &NeteasePlayer::checkSystemPlayerState);
     }
     m_systemPlayerTimer->start(2000);  // 每2秒检查一次
     qDebug() << "[NeteasePlayer] DONE: system player playback started, monitoring...";
+}
+
+// 直接扫描本地音乐目录，离线兜底（字段与 Go server /local/list 保持一致）
+QString NeteasePlayer::scanLocalMusic() {
+    QJsonArray arr;
+    const QString root = "/userdisk/Music";
+    QDirIterator it(root, QDirIterator::Subdirectories | QDirIterator::FollowSymlinks);
+    while (it.hasNext()) {
+        it.next();
+        QFileInfo fi = it.fileInfo();
+        if (!fi.isFile()) continue;
+        const QString path = fi.absoluteFilePath();
+        if (path.contains("/cache/")) continue;
+        const QString ext = fi.suffix().toLower();
+        if (ext != "mp3" && ext != "flac" && ext != "m4a" && ext != "aac" && ext != "wav" && ext != "ogg") continue;
+
+        QJsonObject obj;
+        const QString baseName = fi.completeBaseName();
+        obj.insert("name", baseName);
+        obj.insert("path", path);
+        obj.insert("size", fi.size());
+        obj.insert("sizeStr", QString("%1MB").arg(fi.size() / 1024.0 / 1024.0, 0, 'f', 1));
+        obj.insert("modTime", fi.lastModified().toSecsSinceEpoch());
+        obj.insert("ext", "." + ext);
+
+        // 同名 .lrc（与系统播放器歌词逻辑一致）
+        QString lrcPath = fi.absolutePath() + "/" + baseName + ".lrc";
+        QFileInfo lrcInfo(lrcPath);
+        bool lrcOK = lrcInfo.exists() && lrcInfo.size() > 0;
+        obj.insert("lrc", lrcOK);
+        obj.insert("lrcPath", lrcOK ? lrcPath : QString());
+
+        // 同名 .json 元数据（歌单内顺序 index、歌手 artist），尽力而为
+        QFile metaFile(fi.absolutePath() + "/" + baseName + ".json");
+        if (metaFile.open(QIODevice::ReadOnly)) {
+            QJsonDocument md = QJsonDocument::fromJson(metaFile.readAll());
+            metaFile.close();
+            if (md.isObject()) {
+                QJsonObject mo = md.object();
+                obj.insert("artist", mo.value("artist").toString());
+                obj.insert("index", mo.value("index").toInt());
+            }
+        }
+
+        // 所属目录（相对 /userdisk/Music），与 server 一致："netease" / "netease/<歌单名>"
+        QString folder = fi.absolutePath();
+        if (folder.startsWith(root)) folder = folder.mid(root.length());
+        while (folder.startsWith("/")) folder.remove(0, 1);
+        folder.replace('\\', '/');
+        obj.insert("folder", folder);
+
+        arr.append(obj);
+    }
+    return QString::fromUtf8(QJsonDocument(arr).toJson(QJsonDocument::Compact));
 }
 
 // 轮询系统播放器状态，检测播放完成
@@ -491,10 +571,16 @@ void NeteasePlayer::checkSystemPlayerState() {
 
     int state = playState(mpm);
     // PlayState: 0=STOPPED, 1=PAUSED, 2=PLAYING
-    if (state != 2 && m_playing) {
+    if (state == 2) {
+        m_sawPlaying = true;
+        return;
+    }
+    // 暂停(1)不算播放结束；只有「播放过且已停止(0)」才认为这首放完了
+    if (state == 0 && m_sawPlaying) {
         qDebug() << "[NeteasePlayer] system player finished, state=" << state;
         m_systemPlayerTimer->stop();
         m_usingSystemPlayer = false;
+        m_sawPlaying = false;
         setPlaying(false);
         emit finished();
     }

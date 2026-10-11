@@ -101,12 +101,26 @@ Rectangle {
                     anchors.rightMargin: 8
                     spacing: 6
 
-                    // 搜索图标
-                    Text {
+                    // 搜索图标（Canvas 放大镜，避免 emoji 渲染不可靠）
+                    Canvas {
                         anchors.verticalCenter: parent.verticalCenter
-                        text: "🔍"
-                        font.pixelSize: 9
-                        opacity: 0.5
+                        width: 13
+                        height: 13
+                        opacity: 0.55
+                        onPaint: {
+                            var ctx = getContext("2d")
+                            ctx.clearRect(0, 0, width, height)
+                            ctx.strokeStyle = Theme.textSecondary
+                            ctx.lineWidth = 1.3
+                            ctx.lineCap = "round"
+                            ctx.beginPath()
+                            ctx.arc(5.2, 5.2, 3.4, 0, Math.PI * 2)
+                            ctx.stroke()
+                            ctx.beginPath()
+                            ctx.moveTo(7.8, 7.8)
+                            ctx.lineTo(11.4, 11.4)
+                            ctx.stroke()
+                        }
                     }
 
                     // 显示文本（假输入框）
@@ -128,16 +142,16 @@ Rectangle {
                     anchors.right: parent.right
                     anchors.rightMargin: 6
                     anchors.verticalCenter: parent.verticalCenter
-                    width: 14
-                    height: 14
-                    radius: 7
+                    width: 16
+                    height: 16
+                    radius: 8
                     color: clearMouse.pressed ? Theme.withAlpha(Theme.textPrimary, 0.2) : Theme.withAlpha(Theme.textPrimary, 0.1)
 
                     Text {
                         anchors.centerIn: parent
                         text: "×"
                         color: Theme.textSecondary
-                        font.pixelSize: 10
+                        font.pixelSize: Theme.fontSmall
                         font.bold: true
                     }
 
@@ -250,9 +264,9 @@ Rectangle {
 
                 Rectangle {
                     width: historyText.width + 16
-                    height: 20
+                    height: 28
                     color: histMouse.pressed ? Theme.bgCardHover : Theme.bgCard
-                    radius: 10
+                    radius: 14
                     border.color: Theme.borderLight
                     border.width: 0.5
 
@@ -328,7 +342,7 @@ Rectangle {
 
                 Column {
                     anchors.verticalCenter: parent.verticalCenter
-                    width: parent.width - 50
+                    width: parent.width - 54
                     spacing: 0
 
                     Text {
@@ -350,9 +364,9 @@ Rectangle {
                 }
 
                 Rectangle {
-                    width: 22
-                    height: 22
-                    radius: 11
+                    width: 26
+                    height: 26
+                    radius: 13
                     color: playMouse.pressed ? Theme.primaryDark : Theme.primary
                     anchors.verticalCenter: parent.verticalCenter
 
@@ -360,7 +374,7 @@ Rectangle {
                         anchors.centerIn: parent
                         text: "▶"
                         color: "white"
-                        font.pixelSize: 7
+                        font.pixelSize: Theme.fontTiny
                     }
 
                     MouseArea {

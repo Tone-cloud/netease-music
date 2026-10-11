@@ -46,9 +46,9 @@ Rectangle {
                 anchors.right: parent.right
                 anchors.topMargin: 4
                 anchors.rightMargin: 4
-                width: badgeTextLabel.width + 8
-                height: 14
-                radius: 7
+                width: badgeTextLabel.width + 10
+                height: 16
+                radius: 8
                 color: "#99000000"
                 visible: root.showBadge && root.badgeText.length > 0
 
@@ -57,7 +57,7 @@ Rectangle {
                     anchors.centerIn: parent
                     text: root.badgeText
                     color: "white"
-                    font.pixelSize: 8
+                    font.pixelSize: Theme.fontTiny
                     font.family: Theme.fontFamily
                     font.bold: true
                 }
@@ -67,7 +67,7 @@ Rectangle {
         Text {
             text: root.title
             color: Theme.textPrimary
-            font.pixelSize: Theme.fontTiny
+            font.pixelSize: Theme.fontSmall
             font.family: Theme.fontFamily
             elide: Text.ElideRight
             width: parent.width
