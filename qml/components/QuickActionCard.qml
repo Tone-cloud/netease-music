@@ -6,6 +6,8 @@ Rectangle {
     height: 44
     radius: Theme.radiusLarge
     clip: true
+    // 兜底色：即使 gradient 不支持也显示品牌红，绝不出白框
+    color: Theme.gradientFrom
 
     signal clicked()
 
@@ -15,33 +17,24 @@ Rectangle {
     property color gradFrom: Theme.gradientFrom
     property color gradTo: Theme.gradientTo
 
+    // 原生 QML 渐变（Rectangle.gradient 走场景图，不依赖 Canvas，真机渲染可靠）
+    gradient: Gradient {
+        GradientStop { position: 0.0; color: root.gradFrom }
+        GradientStop { position: 1.0; color: root.gradTo }
+    }
+
     scale: mouseArea.pressed ? 0.95 : 1.0
     Behavior on scale { NumberAnimation { duration: 80 } }
 
-    // 渐变底 + 顶部高光（Canvas，避免依赖 QtGraphicalEffects）
-    Canvas {
-        id: gradCanvas
-        anchors.fill: parent
-
-        onPaint: {
-            var ctx = getContext("2d")
-            ctx.clearRect(0, 0, width, height)
-
-            var g = ctx.createLinearGradient(0, 0, width, 0)
-            g.addColorStop(0, root.gradFrom)
-            g.addColorStop(1, root.gradTo)
-            ctx.fillStyle = g
-            ctx.fillRect(0, 0, width, height)
-
-            var h = ctx.createLinearGradient(0, 0, 0, height * 0.55)
-            h.addColorStop(0, "#33FFFFFF")
-            h.addColorStop(1, "#00FFFFFF")
-            ctx.fillStyle = h
-            ctx.fillRect(0, 0, width, height * 0.55)
+    // 顶部高光（原生渐变覆盖，不依赖 Canvas）
+    Rectangle {
+        width: parent.width
+        height: parent.height * 0.55
+        anchors.top: parent.top
+        gradient: Gradient {
+            GradientStop { position: 0.0; color: "#33FFFFFF" }
+            GradientStop { position: 1.0; color: "#00FFFFFF" }
         }
-
-        onWidthChanged: requestPaint()
-        onHeightChanged: requestPaint()
     }
 
     Row {
