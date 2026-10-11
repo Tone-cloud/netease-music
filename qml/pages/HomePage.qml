@@ -26,9 +26,23 @@ Rectangle {
     property var recommendList: []
     property bool loadingRecommend: false
     property int tabIndex: 0
+    // 推荐歌单最后成功加载的日期（用于跨天自动刷新；插件常驻内存不会重建页面）
+    property string lastRecommendDay: ""
+
+    function todayStr() {
+        var d = new Date()
+        return d.getFullYear() + "-" + (d.getMonth() + 1) + "-" + d.getDate()
+    }
 
     onVisibleChanged: {
-        if (visible) tabIndex = 0
+        if (visible) {
+            tabIndex = 0
+            // 重新进入首页：若跨天或列表为空则自动刷新推荐歌单，
+            // 避免词典笔插件常驻内存导致每天都显示旧列表
+            if (homePage.recommendList.length === 0 || todayStr() !== homePage.lastRecommendDay) {
+                homePage.loadRecommend()
+            }
+        }
     }
 
     function formatPlayCount(count) {
@@ -284,6 +298,7 @@ Rectangle {
             if (d && d.code === 200) {
                 var list = d.recommend || d.playlists || []
                 homePage.recommendList = list.slice(0, 12)
+                homePage.lastRecommendDay = homePage.todayStr()
                 if (cb) cb(true)
             } else {
                 console.log("[home] 推荐歌单返回异常:", JSON.stringify(d))
